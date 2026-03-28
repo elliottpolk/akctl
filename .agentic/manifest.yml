@@ -1,0 +1,52 @@
+# Agentic Kernel Manifest
+# Registry of all active components in this agentic system.
+# This file is mutable. Update it when components are added, removed, or changed.
+# AGENTS.md is the immutable kernel; this file is the contextual registry.
+
+version: "1.0"
+
+project:
+  name: ""
+  description: ""
+  context: .agentic/memories/state/project.md
+
+core:
+  behavior: .agentic/core/BEHAVIOR.md
+  decisions: .agentic/core/DECISIONS.md
+  memory: .agentic/core/MEMORY.md
+
+agents:
+  - name: kernel
+    description: Authoritative guide for the agentic kernel system. Answers questions about structure, state, and evolution. Routes to other agents when appropriate.
+    path: .agentic/agents/kernel
+  - name: agent-foundry
+    description: Designs and scaffolds new agents. Produces a complete, registered agent directory from requirements.
+    path: .agentic/agents/agent-foundry
+
+workflows:
+  - name: spec
+    description: Collaborative, interactive spec creation. Guides user and agent through defining a feature spec, then hands off to /plan to produce a plan.
+    path: .agentic/workflows/spec
+    settings:
+      target_dir: docs/specs/
+  - name: scaffold
+    description: Materializes the Project Structure from a confirmed spec into real files and directories on the feature branch. Run after /spec, before /plan.
+    path: .agentic/workflows/scaffold
+
+skills:
+  - name: copilot-bridge
+    description: Bridges .agentic agents, skills, and workflows into GitHub Copilot. Produces thin wrapper files referencing canonical sources. Use to make any .agentic component available in GitHub Copilot Chat.
+    path: .agentic/skills/copilot-bridge
+  - name: claude-bridge
+    description: Bridges .agentic agents, skills, and workflows into Claude Code and Cowork. Produces thin wrapper files referencing canonical sources.
+    path: .agentic/skills/claude-bridge
+  - name: create-skill
+    description: Create a new agent skill following the agentskills.io specification. Use when asked to create a new skill, add a skill to this workspace, or package agent instructions as a reusable, shareable skill.
+    path: .agentic/skills/create-skill
+  - name: task-backlog
+    description: Cross-agent task capture and execution protocol. Use when identifying work to defer during an active session, or when asked to list or work through pending tasks.
+    path: .agentic/skills/task-backlog
+
+memories:
+  state: .agentic/memories/state
+  history: .agentic/memories/history
