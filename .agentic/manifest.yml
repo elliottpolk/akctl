@@ -6,8 +6,8 @@
 version: "1.0"
 
 project:
-  name: ""
-  description: ""
+  name: akctl
+  description: CLI tool for managing the agentic kernel on a project or directory. Handles init, update, and lifecycle of the .agentic/ system.
   context: .agentic/memories/state/project.md
 
 core:
