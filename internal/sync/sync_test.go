@@ -131,6 +131,70 @@ skills:
     path: .agentic/skills/create-skill
 `
 
+func TestMergeManifest_preservesComments(t *testing.T) {
+	local := `# Agentic Kernel Manifest
+# Do not edit the kernel: block.
+
+version: "1.0"
+
+kernel:
+  title: Old Title
+  version: "1.0"
+  repository: https://github.com/elliottpolk/agentic-kernel
+
+# Project identity -- fill in for your project.
+project:
+  name: "myproject"
+  description: "my description"
+  author: "Elliott"
+
+agents:
+  - name: kernel
+    description: old desc
+    path: .agentic/agents/kernel
+  - name: my-custom
+    description: user addition
+    path: .agentic/agents/my-custom
+`
+	upstream := `version: "1.0"
+kernel:
+  title: Agentic Kernel
+  version: "1.1"
+  repository: https://github.com/elliottpolk/agentic-kernel
+  organization: The Karoshi Workshop
+project:
+  name: ""
+agents:
+  - name: kernel
+    description: new desc
+    path: .agentic/agents/kernel
+`
+	out, err := mergeManifest([]byte(local), []byte(upstream))
+	require.NoError(t, err)
+	s := string(out)
+
+	// Header comments preserved.
+	assert.Contains(t, s, "Agentic Kernel Manifest")
+	assert.Contains(t, s, "Do not edit the kernel: block.")
+
+	// Inline comment above project: preserved.
+	assert.Contains(t, s, "Project identity")
+
+	// project: values preserved from local.
+	assert.Contains(t, s, "myproject")
+	assert.Contains(t, s, "my description")
+	assert.Contains(t, s, "Elliott")
+
+	// kernel: updated from upstream.
+	assert.Contains(t, s, `version: "1.1"`)
+	assert.Contains(t, s, "organization: The Karoshi Workshop")
+
+	// local-only agent preserved.
+	assert.Contains(t, s, "my-custom")
+	// upstream agent desc updated.
+	assert.Contains(t, s, "new desc")
+}
+
 func TestMergeManifest(t *testing.T) {
 	out, err := mergeManifest([]byte(localManifest), []byte(upstreamManifest))
 	require.NoError(t, err)

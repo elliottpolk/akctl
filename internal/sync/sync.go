@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -258,92 +259,127 @@ func writeCore(dir, cacheDir string, paths []string) error {
 	return nil
 }
 
-// mergeManifest merges upstream manifest data into the local manifest.
+// mergeManifest merges upstream manifest data into the local manifest using
+// the yaml.Node AST so that comments and structure of unchanged sections are
+// preserved.
+//
 // Rules:
-//   - kernel: and core: blocks replaced entirely from upstream
-//   - agents:, workflows:, skills: lists: upstream entries win for matched
-//     names; local-only entries are appended
-//   - project: and memories: preserved from local
+//   - kernel: and core: nodes replaced entirely from upstream
+//   - agents:, workflows:, skills: lists merged by name; upstream wins for
+//     matched names; local-only entries appended
+//   - project: and memories: nodes kept from local untouched
 func mergeManifest(local, upstream []byte) ([]byte, error) {
-	var lm, um map[string]interface{}
-	if err := yaml.Unmarshal(local, &lm); err != nil {
+	var ldoc, udoc yaml.Node
+	if err := yaml.Unmarshal(local, &ldoc); err != nil {
 		return nil, fmt.Errorf("parse local manifest: %w", err)
 	}
-	if err := yaml.Unmarshal(upstream, &um); err != nil {
+	if err := yaml.Unmarshal(upstream, &udoc); err != nil {
 		return nil, fmt.Errorf("parse upstream manifest: %w", err)
 	}
-
-	if lm == nil {
-		lm = make(map[string]interface{})
+	if ldoc.Kind != yaml.DocumentNode || len(ldoc.Content) == 0 {
+		return nil, fmt.Errorf("local manifest: not a YAML document")
+	}
+	if udoc.Kind != yaml.DocumentNode || len(udoc.Content) == 0 {
+		return nil, fmt.Errorf("upstream manifest: not a YAML document")
 	}
 
+	lmap := ldoc.Content[0]
+	umap := udoc.Content[0]
+
 	// Replace kernel: and core: wholly from upstream.
-	for _, k := range []string{"kernel", "core"} {
-		if v, ok := um[k]; ok {
-			lm[k] = v
-		}
+	for _, key := range []string{"kernel", "core"} {
+		replaceNode(lmap, umap, key)
 	}
 
 	// Merge list sections by name key.
-	for _, section := range []string{"agents", "workflows", "skills"} {
-		lm[section] = mergeLists(lm[section], um[section])
+	for _, key := range []string{"agents", "workflows", "skills"} {
+		mergeSeq(lmap, umap, key)
 	}
 
-	// project: and memories: stay from local -- no action needed.
-
-	out, err := yaml.Marshal(lm)
-	if err != nil {
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(&ldoc); err != nil {
 		return nil, fmt.Errorf("marshal merged manifest: %w", err)
 	}
-	return out, nil
+	_ = enc.Close()
+	return buf.Bytes(), nil
 }
 
-// mergeLists merges two YAML list values ([]interface{} of maps with a "name"
-// key). Upstream values win for matched names; local-only entries are appended.
-func mergeLists(local, upstream interface{}) interface{} {
-	toSlice := func(v interface{}) []interface{} {
-		if v == nil {
-			return nil
+// valIdx returns the Content index of the value node for key in a mapping
+// node, or -1 if not found.
+func valIdx(m *yaml.Node, key string) int {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return i + 1
 		}
-		s, _ := v.([]interface{})
-		return s
 	}
-	getName := func(item interface{}) string {
-		if m, ok := item.(map[string]interface{}); ok {
-			if n, ok := m["name"].(string); ok {
-				return n
-			}
+	return -1
+}
+
+// replaceNode replaces the value of key in lmap with the value from umap.
+// If key is absent in lmap it is appended. No-op if absent from umap.
+func replaceNode(lmap, umap *yaml.Node, key string) {
+	uidx := valIdx(umap, key)
+	if uidx < 0 {
+		return
+	}
+	uval := umap.Content[uidx]
+	if lidx := valIdx(lmap, key); lidx >= 0 {
+		lmap.Content[lidx] = uval
+	} else {
+		kn := &yaml.Node{Kind: yaml.ScalarNode, Value: key}
+		lmap.Content = append(lmap.Content, kn, uval)
+	}
+}
+
+// mergeSeq merges a sequence node in lmap with the one in umap by name key.
+// Upstream items win for matched names; local-only items are appended.
+func mergeSeq(lmap, umap *yaml.Node, key string) {
+	uidx := valIdx(umap, key)
+	if uidx < 0 {
+		return
+	}
+	useq := umap.Content[uidx]
+
+	lidx := valIdx(lmap, key)
+	if lidx < 0 {
+		// Key absent locally: append it wholesale from upstream.
+		kn := &yaml.Node{Kind: yaml.ScalarNode, Value: key}
+		lmap.Content = append(lmap.Content, kn, useq)
+		return
+	}
+	lseq := lmap.Content[lidx]
+
+	// Build upstream name set.
+	upNames := make(map[string]bool, len(useq.Content))
+	for _, item := range useq.Content {
+		if n := seqItemName(item); n != "" {
+			upNames[n] = true
 		}
+	}
+
+	// Start with upstream items, then append local-only items.
+	merged := make([]*yaml.Node, 0, len(useq.Content)+len(lseq.Content))
+	merged = append(merged, useq.Content...)
+	for _, item := range lseq.Content {
+		if n := seqItemName(item); n != "" && !upNames[n] {
+			merged = append(merged, item)
+		}
+	}
+	lseq.Content = merged
+}
+
+// seqItemName returns the value of the "name" key within a mapping node
+// representing a sequence item, or "" if absent.
+func seqItemName(item *yaml.Node) string {
+	if item.Kind != yaml.MappingNode {
 		return ""
 	}
-
-	ls := toSlice(local)
-	us := toSlice(upstream)
-
-	// Index upstream by name.
-	upIdx := make(map[string]interface{}, len(us))
-	var upOrder []string
-	for _, item := range us {
-		n := getName(item)
-		upIdx[n] = item
-		upOrder = append(upOrder, n)
+	if idx := valIdx(item, "name"); idx >= 0 {
+		return item.Content[idx].Value
 	}
-
-	// Build result: upstream order first.
-	result := make([]interface{}, 0, len(us)+len(ls))
-	for _, n := range upOrder {
-		result = append(result, upIdx[n])
-	}
-
-	// Append local-only entries.
-	for _, item := range ls {
-		n := getName(item)
-		if _, exists := upIdx[n]; !exists {
-			result = append(result, item)
-		}
-	}
-
-	return result
+	return ""
 }
 
 // rollback restores all files from cacheDir back to dir.
