@@ -12,11 +12,7 @@ import (
 	"github.com/google/go-github/v84/github"
 )
 
-const (
-	owner = "elliottpolk"
-	repo  = "agentic-kernel"
-	ref   = "main"
-)
+const ref = "main"
 
 // KernelInfo holds metadata parsed from the upstream AGENTS.md frontmatter
 // and the path to the local temp cache of fetched files.
@@ -38,10 +34,12 @@ type downloader interface {
 // ghDownloader is the real GitHub-backed downloader.
 type ghDownloader struct {
 	client *github.Client
+	owner  string
+	repo   string
 }
 
 func (d *ghDownloader) getTree(ctx context.Context) ([]string, error) {
-	tree, _, err := d.client.Git.GetTree(ctx, owner, repo, ref, true)
+	tree, _, err := d.client.Git.GetTree(ctx, d.owner, d.repo, ref, true)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +54,7 @@ func (d *ghDownloader) getTree(ctx context.Context) ([]string, error) {
 }
 
 func (d *ghDownloader) download(ctx context.Context, path string) ([]byte, error) {
-	rc, resp, err := d.client.Repositories.DownloadContents(ctx, owner, repo, path, &github.RepositoryContentGetOptions{Ref: ref})
+	rc, resp, err := d.client.Repositories.DownloadContents(ctx, d.owner, d.repo, path, &github.RepositoryContentGetOptions{Ref: ref})
 	if err != nil {
 		return nil, err
 	}
@@ -71,8 +69,8 @@ func (d *ghDownloader) download(ctx context.Context, path string) ([]byte, error
 // to a temporary directory, and returns a KernelInfo with metadata and the
 // cache path. On any failure the temp dir is removed and the error is returned
 // verbatim. The caller is responsible for os.RemoveAll(k.CacheDir) when done.
-func Fetch(ctx context.Context) (*KernelInfo, error) {
-	return fetch(ctx, &ghDownloader{client: github.NewClient(nil)})
+func Fetch(ctx context.Context, client *github.Client, owner, repo string) (*KernelInfo, error) {
+	return fetch(ctx, &ghDownloader{client: client, owner: owner, repo: repo})
 }
 
 // fetch is the testable core of Fetch -- accepts any downloader implementation.

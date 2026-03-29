@@ -185,7 +185,7 @@ func TestGHDownloader_GetTree(t *testing.T) {
 			srv := httptest.NewServer(tt.handler)
 			defer srv.Close()
 
-			d := &ghDownloader{client: newTestClient(t, srv)}
+			d := &ghDownloader{client: newTestClient(t, srv), owner: "testowner", repo: "testrepo"}
 			paths, err := d.getTree(context.Background())
 
 			if tt.wantErr {
@@ -237,7 +237,7 @@ func TestGHDownloader_Download(t *testing.T) {
 			srv := httptest.NewServer(tt.handler)
 			defer srv.Close()
 
-			d := &ghDownloader{client: newTestClient(t, srv)}
+			d := &ghDownloader{client: newTestClient(t, srv), owner: "testowner", repo: "testrepo"}
 			content, err := d.download(context.Background(), tt.path)
 
 			if tt.wantErr {
@@ -282,8 +282,8 @@ func TestFetch(t *testing.T) {
 					"README.md", // should be filtered out
 				},
 				files: map[string][]byte{
-					"AGENTS.md":              []byte(minimalAgentsMD),
-					".agentic/manifest.yml":  []byte(minimalManifest),
+					"AGENTS.md":             []byte(minimalAgentsMD),
+					".agentic/manifest.yml": []byte(minimalManifest),
 				},
 			},
 			check: func(t *testing.T, k *KernelInfo) {
@@ -379,4 +379,3 @@ func TestFetch(t *testing.T) {
 		})
 	}
 }
-

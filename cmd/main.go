@@ -11,6 +11,7 @@ import (
 
 	cli "github.com/urfave/cli/v2"
 
+	ghpkg "github.com/elliottpolk/akctl/internal/github"
 	"github.com/elliottpolk/akctl/internal/kernel"
 	"github.com/elliottpolk/akctl/internal/setup"
 )
@@ -38,6 +39,18 @@ var (
 		Name:    "force",
 		Aliases: []string{"f"},
 		Usage:   "Skip destructive overwrite confirmation prompts",
+	}
+
+	kernelSourceFlag = &cli.StringFlag{
+		Name:    "kernel.source",
+		Aliases: []string{"kernel.src"},
+		Usage:   "Kernel source as github.com/<owner>/<repo> (default: github.com/elliottpolk/agentic-kernel)",
+	}
+
+	githubTokenFlag = &cli.StringFlag{
+		Name:    "github.token",
+		Usage:   "GitHub personal access token for private repos and higher rate limits",
+		EnvVars: []string{"GITHUB_TOKEN"},
 	}
 )
 
@@ -120,15 +133,38 @@ func main() {
 					logLevelFlag,
 					logFormatFlag,
 					forceFlag,
+					kernelSourceFlag,
+					githubTokenFlag,
 				},
 				Action: func(c *cli.Context) error {
 					logger, done := setupLogger(c)
 					defer done(time.Now())
 
-					logger.Info("fetching upstream kernel")
+					ctx := context.Background()
 
-					k, err := kernel.Fetch(context.Background())
+					owner, repo, err := ghpkg.ParseSource(c.String(kernelSourceFlag.Name))
 					if err != nil {
+						return cli.Exit(err.Error(), 1)
+					}
+
+					token := strings.TrimSpace(c.String(githubTokenFlag.Name))
+
+					client := ghpkg.NewClient(ctx, token)
+
+					if err := ghpkg.CheckRateLimit(ctx, client); err != nil {
+						return cli.Exit(err.Error(), 1)
+					}
+
+					logger.Info("fetching upstream kernel", "source", owner+"/"+repo)
+
+					k, err := kernel.Fetch(ctx, client, owner, repo)
+					if err != nil {
+						if ghpkg.IsNotFound(err) && token == "" {
+							return cli.Exit("repo not found or may be private; use --github.token if the repo is private", 1)
+						}
+						if ghpkg.IsNotFound(err) {
+							return cli.Exit(fmt.Sprintf("repo %s/%s not found", owner, repo), 1)
+						}
 						return cli.Exit(fmt.Sprintf("fetch kernel: %v", err), 1)
 					}
 					defer os.RemoveAll(k.CacheDir)
