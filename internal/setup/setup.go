@@ -35,6 +35,11 @@ type projectMeta struct {
 var (
 	warnHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))
 	warnPath   = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+
+	// collectMetaFn and confirmFn are package-level vars so tests can inject
+	// non-interactive implementations without a TTY.
+	collectMetaFn = collectMeta
+	confirmFn     = confirmOverwrite
 )
 
 // Run orchestrates the full init sequence.
@@ -50,7 +55,7 @@ func Run(k *kernel.KernelInfo, opts Options) error {
 		paths := genDestructList(target, agentsmd, dotagentic)
 		showDestructList(paths, true)
 
-		ok, err := confirmOverwrite(opts.Force)
+		ok, err := confirmFn(opts.Force)
 		if err != nil {
 			return fmt.Errorf("confirm: %w", err)
 		}
@@ -68,7 +73,7 @@ func Run(k *kernel.KernelInfo, opts Options) error {
 		return fmt.Errorf("determine project name: %w", err)
 	}
 
-	meta, err := collectMeta(defaultName)
+	meta, err := collectMetaFn(defaultName)
 	if err != nil {
 		return fmt.Errorf("collect metadata: %w", err)
 	}

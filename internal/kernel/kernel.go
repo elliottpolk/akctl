@@ -29,14 +29,55 @@ type KernelInfo struct {
 	CacheDir     string
 }
 
+// downloader abstracts GitHub file retrieval so it can be swapped in tests.
+type downloader interface {
+	getTree(ctx context.Context) ([]string, error)
+	download(ctx context.Context, path string) ([]byte, error)
+}
+
+// ghDownloader is the real GitHub-backed downloader.
+type ghDownloader struct {
+	client *github.Client
+}
+
+func (d *ghDownloader) getTree(ctx context.Context) ([]string, error) {
+	tree, _, err := d.client.Git.GetTree(ctx, owner, repo, ref, true)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, entry := range tree.Entries {
+		if entry.Type == nil || *entry.Type != "blob" || entry.Path == nil {
+			continue
+		}
+		paths = append(paths, *entry.Path)
+	}
+	return paths, nil
+}
+
+func (d *ghDownloader) download(ctx context.Context, path string) ([]byte, error) {
+	rc, resp, err := d.client.Repositories.DownloadContents(ctx, owner, repo, path, &github.RepositoryContentGetOptions{Ref: ref})
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	return io.ReadAll(rc)
+}
+
 // Fetch retrieves the upstream kernel from GitHub, writes all relevant files
 // to a temporary directory, and returns a KernelInfo with metadata and the
 // cache path. On any failure the temp dir is removed and the error is returned
 // verbatim. The caller is responsible for os.RemoveAll(k.CacheDir) when done.
 func Fetch(ctx context.Context) (*KernelInfo, error) {
-	client := github.NewClient(nil)
+	return fetch(ctx, &ghDownloader{client: github.NewClient(nil)})
+}
 
-	tree, _, err := client.Git.GetTree(ctx, owner, repo, ref, true)
+// fetch is the testable core of Fetch -- accepts any downloader implementation.
+func fetch(ctx context.Context, d downloader) (*KernelInfo, error) {
+	paths, err := d.getTree(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch kernel tree: %w", err)
 	}
@@ -48,34 +89,15 @@ func Fetch(ctx context.Context) (*KernelInfo, error) {
 
 	var agentsMDContent []byte
 
-	for _, entry := range tree.Entries {
-		if entry.Type == nil || *entry.Type != "blob" {
-			continue
-		}
-		if entry.Path == nil {
-			continue
-		}
-		p := *entry.Path
+	for _, p := range paths {
 		if p != "AGENTS.md" && !strings.HasPrefix(p, ".agentic/") {
 			continue
 		}
 
-		rc, resp, err := client.Repositories.DownloadContents(ctx, owner, repo, p, &github.RepositoryContentGetOptions{Ref: ref})
+		content, err := d.download(ctx, p)
 		if err != nil {
 			os.RemoveAll(cacheDir)
 			return nil, fmt.Errorf("fetch %s: %w", p, err)
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			rc.Close()
-			os.RemoveAll(cacheDir)
-			return nil, fmt.Errorf("fetch %s: unexpected status %d", p, resp.StatusCode)
-		}
-
-		content, err := io.ReadAll(rc)
-		rc.Close()
-		if err != nil {
-			os.RemoveAll(cacheDir)
-			return nil, fmt.Errorf("read %s: %w", p, err)
 		}
 
 		dest := filepath.Join(cacheDir, filepath.FromSlash(p))
