@@ -17,7 +17,7 @@ Initializes a project or directory with the agentic kernel by pulling the canoni
 - Go (1.26)
 - `github.com/urfave/cli/v2` -- CLI framework
 - `github.com/google/go-github/v84` -- GitHub API client
-- `github.com/charmbracelet/bubbletea/v2` -- interactive TUI
+- `charm.land/bubbletea/v2` -- interactive TUI
 - `github.com/charmbracelet/huh` -- forms and input prompts
 - `github.com/charmbracelet/lipgloss` -- terminal styling
 
@@ -25,7 +25,7 @@ Initializes a project or directory with the agentic kernel by pulling the canoni
 
 - `cmd/main.go` -- existing entrypoint; wire the implemented `init` action here
 - `internal/kernel/` -- fetch and parse the upstream kernel from GitHub; extract version from `AGENTS.md` frontmatter
-- `internal/init/` -- init orchestration logic; metadata collection, conflict detection, write sequencing
+- `internal/setup/` -- init orchestration logic; metadata collection, conflict detection, write sequencing
 
 ## Scope Boundaries
 
