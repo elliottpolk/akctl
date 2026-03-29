@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,6 +10,9 @@ import (
 	"time"
 
 	cli "github.com/urfave/cli/v2"
+
+	"github.com/elliottpolk/akctl/internal/kernel"
+	"github.com/elliottpolk/akctl/internal/setup"
 )
 
 var (
@@ -28,6 +32,12 @@ var (
 		Aliases: []string{"lf"},
 		Usage:   "Set the logging format (text, json)",
 		Value:   "text",
+	}
+
+	forceFlag = &cli.BoolFlag{
+		Name:    "force",
+		Aliases: []string{"f"},
+		Usage:   "Skip destructive overwrite confirmation prompts",
 	}
 )
 
@@ -109,14 +119,30 @@ func main() {
 				Flags: []cli.Flag{
 					logLevelFlag,
 					logFormatFlag,
+					forceFlag,
 				},
 				Action: func(c *cli.Context) error {
 					logger, done := setupLogger(c)
 					defer done(time.Now())
 
-					logger.Info("stubbed command executed", "command", "init")
+					logger.Info("fetching upstream kernel")
 
-					return cli.Exit("not implemented yet", 1)
+					k, err := kernel.Fetch(context.Background())
+					if err != nil {
+						return cli.Exit(fmt.Sprintf("fetch kernel: %v", err), 1)
+					}
+					defer os.RemoveAll(k.CacheDir)
+
+					logger.Debug("kernel fetched", "version", k.Version, "cache", k.CacheDir)
+
+					if err := setup.Run(k, setup.Options{
+						Force:     c.Bool(forceFlag.Name),
+						TargetDir: ".",
+					}); err != nil {
+						return cli.Exit(err.Error(), 1)
+					}
+
+					return nil
 				},
 			},
 			{
