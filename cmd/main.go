@@ -97,15 +97,15 @@ func main() {
 
 	app := cli.App{
 		Name:        "akctl",
-		Description: "",
+		Description: "Agentic Kernel CLI tool for managing and updating the agentic kernel",
 		Copyright:   fmt.Sprintf("© %s The Karoshi Workshop", crdate),
 		Version:     fmt.Sprintf("%s | compiled %s | commit %s", version, time.Unix(ct, -1).Format(time.RFC3339), githash),
 		Compiled:    time.Unix(ct, -1),
 		Commands: []*cli.Command{
 			{
-				Name:        "",
-				Aliases:     []string{""},
-				Description: "",
+				Name:        "init",
+				Aliases:     []string{"setup"},
+				Description: "Initialize the project/directory with the agentic kernel",
 				Flags: []cli.Flag{
 					logLevelFlag,
 					logFormatFlag,
@@ -114,7 +114,7 @@ func main() {
 					logger, done := setupLogger(c)
 					defer done(time.Now())
 
-					logger.Info("hello")
+					logger.Info("stubbed command executed", "command", "init")
 
 					return cli.Exit("not implemented yet", 1)
 				},
