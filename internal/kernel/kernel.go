@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/goccy/go-yaml"
 	"github.com/google/go-github/v84/github"
-	"gopkg.in/yaml.v3"
 )
 
 // Manifest is a minimal typed view of .agentic/manifest.yml sufficient for

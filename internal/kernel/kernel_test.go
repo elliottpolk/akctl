@@ -380,6 +380,7 @@ func TestFetch(t *testing.T) {
 		})
 	}
 }
+
 // --- ManifestRepo ---
 
 func TestManifestRepo(t *testing.T) {
