@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -376,6 +377,93 @@ func TestFetch(t *testing.T) {
 			if tt.check != nil {
 				tt.check(t, k)
 			}
+		})
+	}
+}
+// --- ManifestRepo ---
+
+func TestManifestRepo(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "valid",
+			content: `kernel:
+  repository: https://github.com/elliottpolk/agentic-kernel
+  version: "1.0"
+`,
+			want: "https://github.com/elliottpolk/agentic-kernel",
+		},
+		{
+			name:    "missing kernel.repository",
+			content: "version: \"1.0\"\n",
+			wantErr: true,
+		},
+		{
+			name:    "empty repository field",
+			content: "kernel:\n  repository: \"\"\n",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			require.NoError(t, os.MkdirAll(filepath.Join(dir, ".agentic"), 0755))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, ".agentic", "manifest.yml"), []byte(tt.content), 0644))
+			got, err := ManifestRepo(dir)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// --- AgentsRepo ---
+
+func TestAgentsRepo(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:    "valid",
+			content: minimalAgentsMD,
+			want:    "https://github.com/elliottpolk/agentic-kernel",
+		},
+		{
+			name:    "no frontmatter",
+			content: "# Agentic Kernel\n",
+			wantErr: true,
+		},
+		{
+			name: "missing repository field",
+			content: `---
+title: Agentic Kernel
+version: "1.0"
+---
+`,
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(tt.content), 0644))
+			got, err := AgentsRepo(dir)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

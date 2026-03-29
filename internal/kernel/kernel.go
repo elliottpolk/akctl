@@ -10,7 +10,52 @@ import (
 	"strings"
 
 	"github.com/google/go-github/v84/github"
+	"gopkg.in/yaml.v3"
 )
+
+// Manifest is a minimal typed view of .agentic/manifest.yml sufficient for
+// sync operations. Unknown/user fields are preserved in the raw decoded map.
+type Manifest struct {
+	Kernel struct {
+		Repository string `yaml:"repository"`
+		Version    string `yaml:"version"`
+	} `yaml:"kernel"`
+}
+
+// manifestRepo reads .agentic/manifest.yml from targetDir and returns the
+// kernel.repository value, or an error if absent or unreadable.
+func ManifestRepo(targetDir string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(targetDir, ".agentic", "manifest.yml"))
+	if err != nil {
+		return "", fmt.Errorf("read manifest: %w", err)
+	}
+	var m Manifest
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return "", fmt.Errorf("parse manifest: %w", err)
+	}
+	if strings.TrimSpace(m.Kernel.Repository) == "" {
+		return "", fmt.Errorf("manifest missing kernel.repository")
+	}
+	return m.Kernel.Repository, nil
+}
+
+// AgentsRepo reads AGENTS.md from targetDir and returns the repository field
+// from its frontmatter, or an error if the file is absent or malformed.
+func AgentsRepo(targetDir string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(targetDir, "AGENTS.md"))
+	if err != nil {
+		return "", fmt.Errorf("read AGENTS.md: %w", err)
+	}
+	fm, err := parseFrontmatter(string(data))
+	if err != nil {
+		return "", fmt.Errorf("parse AGENTS.md frontmatter: %w", err)
+	}
+	repo := strings.TrimSpace(fm["repository"])
+	if repo == "" {
+		return "", fmt.Errorf("AGENTS.md missing repository field")
+	}
+	return repo, nil
+}
 
 const ref = "main"
 

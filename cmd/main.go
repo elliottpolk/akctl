@@ -14,6 +14,7 @@ import (
 	ghpkg "github.com/elliottpolk/akctl/internal/github"
 	"github.com/elliottpolk/akctl/internal/kernel"
 	"github.com/elliottpolk/akctl/internal/setup"
+	syncp "github.com/elliottpolk/akctl/internal/sync"
 )
 
 var (
@@ -188,14 +189,43 @@ func main() {
 				Flags: []cli.Flag{
 					logLevelFlag,
 					logFormatFlag,
+					forceFlag,
+					kernelSourceFlag,
+					githubTokenFlag,
 				},
 				Action: func(c *cli.Context) error {
 					logger, done := setupLogger(c)
 					defer done(time.Now())
 
-					logger.Info("stubbed command executed", "command", "sync")
+					ctx := context.Background()
 
-					return cli.Exit("not implemented yet", 1)
+					token := strings.TrimSpace(c.String(githubTokenFlag.Name))
+					client := ghpkg.NewClient(ctx, token)
+
+					if err := ghpkg.CheckRateLimit(ctx, client); err != nil {
+						return cli.Exit(err.Error(), 1)
+					}
+
+					targetDir := "."
+
+					// If --kernel.source is provided, use it; otherwise let
+					// sync.Run resolve the repo from local artifacts.
+					if src := strings.TrimSpace(c.String(kernelSourceFlag.Name)); src != "" {
+						owner, repo, err := ghpkg.ParseSource(src)
+						if err != nil {
+							return cli.Exit(err.Error(), 1)
+						}
+						logger.Info("fetching upstream kernel", "source", owner+"/"+repo)
+					}
+
+					if err := syncp.Run(ctx, client, syncp.Options{
+						Force:     c.Bool(forceFlag.Name),
+						TargetDir: targetDir,
+					}); err != nil {
+						return cli.Exit(err.Error(), 1)
+					}
+
+					return nil
 				},
 			},
 		},
