@@ -40,4 +40,8 @@ Memory files are written for agents, not human operators. Humans may read them, 
 
 **Audience test:** Before writing to memory, ask: "Is this useful to a future agent session, or to a human reader?" If it is for a human, write it elsewhere.
 
-**Full guide:** `.agentic/core/MEMORY.md` -- naming conventions, update rules, anti-patterns, and history format.
+**Platform memory:** When the active platform provides a vendor-specific memory mechanism (e.g. Copilot's `/memories/` tool, Claude's memory store):
+- **Reads:** MUST read from the appropriate `.agentic/` memory location first (shared: `.agentic/memories/`; agent-specific: `.agentic/agents/{name}/memories/`). Vendor memory MAY be read as a supplement. If the two conflict, `.agentic/` is ground truth.
+- **Writes:** MUST write to the appropriate `.agentic/` memory location. Writing to the vendor store in addition is permitted. The vendor store MUST NOT substitute for either agnostic memory location. If only one write is possible, write to the `.agentic/` location.
+
+**Full guide:** `.agentic/core/MEMORY.md` covers naming conventions, update rules, anti-patterns, platform memory hierarchy, and history format.

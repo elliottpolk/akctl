@@ -40,7 +40,7 @@ unit-test: update-deps; $(info $(M) running unit tests ...)          @ ## run th
 build: build-dir update-deps; $(info $(M) building ...)             @ ## build the binary
 	@GOOS=$(GOOS) GOARCH=$(GOARCH) go build \
 		-ldflags "-X main.version=$(BIN_VERSION) -X main.compiled=$(COMPILED) -X main.githash=$(COMMIT)" \
-		-o ./build/bin/$(BIN) ./cmd/*.go
+		-o ./build/bin/$(BIN) ./cmd/akctl/...
 
 .PHONY: build-dir
 build-dir: ;
@@ -50,22 +50,22 @@ build-dir: ;
 install: ; $(info $(M) installing locally ...) 						@ ## install binary locally
 	@GOOS=$(GOOS) GOARCH=$(GOARCH) go build \
 		-ldflags "-X main.version=$(BIN_VERSION) -X main.compiled=$(COMPILED) -X main.githash=$(COMMIT)" \
-		-o $(GOPATH)/bin/$(BIN) ./cmd/*.go
+		-o $(GOPATH)/bin/$(BIN) ./cmd/akctl/...
 
 .PHONY: build-cli
 build-cli: clean build-dir update-deps; $(info $(M) building various cli versions ...)			@ ## build out the various OS and architecture builds
 	@GOOS=linux GOARCH=amd64 go build \
 		-ldflags "-X main.version=$(BIN_VERSION) -X main.compiled=$(COMPILED) -X main.githash=$(COMMIT)" \
-		-o ./build/bin/$(BIN)-linux-amd64 ./cmd/*.go
+		-o ./build/bin/$(BIN)-linux-amd64 ./cmd/akctl/...
 	@GOOS=windows GOARCH=amd64 go build \
 		-ldflags "-X main.version=$(BIN_VERSION) -X main.compiled=$(COMPILED) -X main.githash=$(COMMIT)" \
-		-o ./build/bin/$(BIN)-windows-amd64.exe ./cmd/*.go
+		-o ./build/bin/$(BIN)-windows-amd64.exe ./cmd/akctl/...
 	@GOOS=darwin GOARCH=amd64 go build \
 		-ldflags "-X main.version=$(BIN_VERSION) -X main.compiled=$(COMPILED) -X main.githash=$(COMMIT)" \
-		-o ./build/bin/$(BIN)-darwin-amd64 ./cmd/*.go
+		-o ./build/bin/$(BIN)-darwin-amd64 ./cmd/akctl/...
 	@GOOS=darwin GOARCH=arm64 go build \
 		-ldflags "-X main.version=$(BIN_VERSION) -X main.compiled=$(COMPILED) -X main.githash=$(COMMIT)" \
-		-o ./build/bin/$(BIN)-darwin-arm64 ./cmd/*.go
+		-o ./build/bin/$(BIN)-darwin-arm64 ./cmd/akctl/...
 	@tree ./build/bin
 
 .PHONY: help

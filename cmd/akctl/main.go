@@ -190,11 +190,10 @@ func main() {
 					logLevelFlag,
 					logFormatFlag,
 					forceFlag,
-					kernelSourceFlag,
 					githubTokenFlag,
 				},
 				Action: func(c *cli.Context) error {
-					logger, done := setupLogger(c)
+					_, done := setupLogger(c)
 					defer done(time.Now())
 
 					ctx := context.Background()
@@ -207,16 +206,6 @@ func main() {
 					}
 
 					targetDir := "."
-
-					// If --kernel.source is provided, use it; otherwise let
-					// sync.Run resolve the repo from local artifacts.
-					if src := strings.TrimSpace(c.String(kernelSourceFlag.Name)); src != "" {
-						owner, repo, err := ghpkg.ParseSource(src)
-						if err != nil {
-							return cli.Exit(err.Error(), 1)
-						}
-						logger.Info("fetching upstream kernel", "source", owner+"/"+repo)
-					}
 
 					if err := syncp.Run(ctx, client, syncp.Options{
 						Force:     c.Bool(forceFlag.Name),

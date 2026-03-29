@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -10,9 +11,8 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/parser"
 	gogithub "github.com/google/go-github/v84/github"
+	"gopkg.in/yaml.v3"
 
 	"github.com/elliottpolk/akctl/internal/kernel"
 )
@@ -44,7 +44,7 @@ var (
 
 	// confirmFn and warnFn are vars so tests can inject non-interactive stubs.
 	confirmFn = confirm
-	warnFn    = printWarning
+	warnFn    = func(source string, paths []string) { printWarning(source, paths) }
 )
 
 // Run is the top-level sync orchestration entry point.
@@ -73,13 +73,14 @@ func Run(ctx context.Context, client *gogithub.Client, opts Options) error {
 	}
 	defer os.RemoveAll(k.CacheDir)
 
-	// Identify which local files will be touched.
-	coreFiles, err := corePaths(dir, k.CacheDir)
+	// Identify which local files will be touched, using the upstream manifest's
+	// agent list to dynamically determine user-owned paths.
+	coreFiles, err := corePaths(dir, k.CacheDir, k.AgentPaths)
 	if err != nil {
 		return fmt.Errorf("resolve core paths: %w", err)
 	}
 
-	warnFn(coreFiles)
+	warnFn(repoURL, coreFiles)
 
 	// Recovery mode: inform user before proceeding.
 	if state == StateAgentsMDOnly || state == StateAgenticOnly {
@@ -156,20 +157,20 @@ func splitRepo(repoURL string) (string, string, error) {
 }
 
 // userOwned returns true for paths that belong to the user and must not be
-// overwritten by sync.
-func userOwned(rel string) bool {
+// overwritten by sync. agentPaths is the list of agent directory paths
+// declared in the upstream manifest (e.g. ".agentic/agents/kernel").
+func userOwned(rel string, agentPaths []string) bool {
 	rel = filepath.ToSlash(rel)
-	prefixes := []string{
-		".agentic/memories/",
-		".agentic/agents/kernel/memories/",
-		".agentic/agents/kernel/notes/",
-		".agentic/agents/kernel/references/",
-		".agentic/agents/agent-foundry/memories/",
-		".agentic/agents/agent-foundry/notes/",
-		".agentic/agents/agent-foundry/references/",
+	// Global memories dir is always user-owned regardless of kernel structure.
+	if strings.HasPrefix(rel, ".agentic/memories/") {
+		return true
 	}
-	for _, p := range prefixes {
-		if strings.HasPrefix(rel, p) {
+	// Per-agent subdirectories that contain user data.
+	for _, p := range agentPaths {
+		p = strings.TrimSuffix(filepath.ToSlash(p), "/")
+		if strings.HasPrefix(rel, p+"/memories/") ||
+			strings.HasPrefix(rel, p+"/notes/") ||
+			strings.HasPrefix(rel, p+"/references/") {
 			return true
 		}
 	}
@@ -178,7 +179,8 @@ func userOwned(rel string) bool {
 
 // corePaths returns the list of relative paths (from dir) that sync will
 // overwrite -- the intersection of upstream cache files and non-user-owned paths.
-func corePaths(dir, cacheDir string) ([]string, error) {
+// agentPaths is forwarded to userOwned to derive protected paths dynamically.
+func corePaths(dir, cacheDir string, agentPaths []string) ([]string, error) {
 	var paths []string
 	err := filepath.WalkDir(cacheDir, func(src string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -186,7 +188,7 @@ func corePaths(dir, cacheDir string) ([]string, error) {
 		}
 		rel, _ := filepath.Rel(cacheDir, src)
 		rel = filepath.ToSlash(rel)
-		if !userOwned(rel) {
+		if !userOwned(rel, agentPaths) {
 			paths = append(paths, rel)
 		}
 		return nil
@@ -260,8 +262,8 @@ func writeCore(dir, cacheDir string, paths []string) error {
 }
 
 // mergeManifest merges upstream manifest data into the local manifest using
-// the go-yaml AST so that comments and structure of unchanged sections are
-// preserved.
+// gopkg.in/yaml.v3 Node trees so that comments and key ordering of the local
+// file are always preserved in the output.
 //
 // Rules:
 //   - kernel: and core: nodes replaced entirely from upstream
@@ -269,25 +271,23 @@ func writeCore(dir, cacheDir string, paths []string) error {
 //     matched names; local-only entries appended
 //   - project: and memories: nodes kept from local untouched
 func mergeManifest(local, upstream []byte) ([]byte, error) {
-	lfile, err := parser.ParseBytes(local, parser.ParseComments)
-	if err != nil {
+	var localDoc yaml.Node
+	if err := yaml.Unmarshal(local, &localDoc); err != nil {
 		return nil, fmt.Errorf("parse local manifest: %w", err)
 	}
-	ufile, err := parser.ParseBytes(upstream, 0)
-	if err != nil {
+	var upstreamDoc yaml.Node
+	if err := yaml.Unmarshal(upstream, &upstreamDoc); err != nil {
 		return nil, fmt.Errorf("parse upstream manifest: %w", err)
 	}
-	if len(lfile.Docs) == 0 || len(ufile.Docs) == 0 {
+	if len(localDoc.Content) == 0 || len(upstreamDoc.Content) == 0 {
 		return nil, fmt.Errorf("empty manifest document")
 	}
 
-	lmap, ok := lfile.Docs[0].Body.(*ast.MappingNode)
-	if !ok {
-		return nil, fmt.Errorf("local manifest: expected mapping document")
-	}
-	umap, ok := ufile.Docs[0].Body.(*ast.MappingNode)
-	if !ok {
-		return nil, fmt.Errorf("upstream manifest: expected mapping document")
+	lmap := localDoc.Content[0]
+	umap := upstreamDoc.Content[0]
+
+	if lmap.Kind != yaml.MappingNode || umap.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("manifest must be a YAML mapping at its root")
 	}
 
 	for _, key := range []string{"kernel", "core"} {
@@ -297,84 +297,101 @@ func mergeManifest(local, upstream []byte) ([]byte, error) {
 		mergeSeq(lmap, umap, key)
 	}
 
-	return []byte(lfile.String()), nil
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(&localDoc); err != nil {
+		return nil, fmt.Errorf("marshal merged manifest: %w", err)
+	}
+	if err := enc.Close(); err != nil {
+		return nil, fmt.Errorf("close yaml encoder: %w", err)
+	}
+	return buf.Bytes(), nil
 }
 
-// mvNode finds the MappingValueNode with the given key in m, or nil.
-func mvNode(m *ast.MappingNode, key string) *ast.MappingValueNode {
-	for _, mv := range m.Values {
-		if mv.Key.GetToken().Value == key {
-			return mv
+// nodeValue finds the value node for a key in a yaml.v3 mapping node, or nil.
+func nodeValue(m *yaml.Node, key string) *yaml.Node {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return m.Content[i+1]
 		}
 	}
 	return nil
 }
 
-// replaceNode replaces key's value in lmap with value from umap.
-// If absent in lmap, the upstream entry is appended. No-op if absent from umap.
-func replaceNode(lmap, umap *ast.MappingNode, key string) {
-	umv := mvNode(umap, key)
-	if umv == nil {
+// replaceNode replaces key's value in lmap with the value from umap.
+// If the key is absent in lmap, the upstream key-value pair is appended.
+// No-op if the key is absent from umap.
+func replaceNode(lmap, umap *yaml.Node, key string) {
+	uval := nodeValue(umap, key)
+	if uval == nil {
 		return
 	}
-	if lmv := mvNode(lmap, key); lmv != nil {
-		lmv.Value = umv.Value
-	} else {
-		lmap.Values = append(lmap.Values, umv)
+	for i := 0; i+1 < len(lmap.Content); i += 2 {
+		if lmap.Content[i].Value == key {
+			lmap.Content[i+1] = uval
+			return
+		}
+	}
+	// Key not in local; find and append the full upstream key-value pair.
+	for i := 0; i+1 < len(umap.Content); i += 2 {
+		if umap.Content[i].Value == key {
+			lmap.Content = append(lmap.Content, umap.Content[i], umap.Content[i+1])
+			return
+		}
 	}
 }
 
 // mergeSeq merges a sequence in lmap with one from umap by "name" key.
 // Upstream items win for matched names; local-only items are appended.
-func mergeSeq(lmap, umap *ast.MappingNode, key string) {
-	umv := mvNode(umap, key)
-	if umv == nil {
-		return
-	}
-	useq, ok := umv.Value.(*ast.SequenceNode)
-	if !ok {
+func mergeSeq(lmap, umap *yaml.Node, key string) {
+	uval := nodeValue(umap, key)
+	if uval == nil || uval.Kind != yaml.SequenceNode {
 		return
 	}
 
-	lmv := mvNode(lmap, key)
-	if lmv == nil {
-		lmap.Values = append(lmap.Values, umv)
+	lval := nodeValue(lmap, key)
+	if lval == nil {
+		for i := 0; i+1 < len(umap.Content); i += 2 {
+			if umap.Content[i].Value == key {
+				lmap.Content = append(lmap.Content, umap.Content[i], umap.Content[i+1])
+				return
+			}
+		}
 		return
 	}
-	lseq, ok := lmv.Value.(*ast.SequenceNode)
-	if !ok {
-		lmv.Value = useq
+	if lval.Kind != yaml.SequenceNode {
+		lval.Content = uval.Content
 		return
 	}
 
-	upNames := make(map[string]bool, len(useq.Values))
-	for _, item := range useq.Values {
-		if n := seqName(item); n != "" {
+	upNames := make(map[string]bool, len(uval.Content))
+	for _, item := range uval.Content {
+		if n := seqItemName(item); n != "" {
 			upNames[n] = true
 		}
 	}
 
-	merged := make([]ast.Node, 0, len(useq.Values)+len(lseq.Values))
-	merged = append(merged, useq.Values...)
-	for _, item := range lseq.Values {
-		if n := seqName(item); n != "" && !upNames[n] {
+	merged := make([]*yaml.Node, 0, len(uval.Content)+len(lval.Content))
+	merged = append(merged, uval.Content...)
+	for _, item := range lval.Content {
+		if n := seqItemName(item); n != "" && !upNames[n] {
 			merged = append(merged, item)
 		}
 	}
-	lseq.Values = merged
+	lval.Content = merged
 }
 
-// seqName returns the "name" field value from a sequence item mapping node.
-func seqName(item ast.Node) string {
-	m, ok := item.(*ast.MappingNode)
-	if !ok {
+// seqItemName returns the "name" field value from a sequence item mapping node.
+func seqItemName(item *yaml.Node) string {
+	if item.Kind != yaml.MappingNode {
 		return ""
 	}
-	mv := mvNode(m, "name")
-	if mv == nil {
+	val := nodeValue(item, "name")
+	if val == nil {
 		return ""
 	}
-	return mv.Value.GetToken().Value
+	return val.Value
 }
 
 // rollback restores all files from cacheDir back to dir.
@@ -400,10 +417,11 @@ func rollback(cacheDir, dir string) error {
 	return os.RemoveAll(cacheDir)
 }
 
-// printWarning displays a destructive-overwrite warning and the list of files
-// that will be changed.
-func printWarning(paths []string) {
-	fmt.Println(warnStyle.Render("WARNING: The following core files will be overwritten. Any local modifications will be lost:"))
+// printWarning displays the upstream kernel source and the list of files
+// that will be destructively overwritten.
+func printWarning(source string, paths []string) {
+	fmt.Println(warnStyle.Render("WARNING: Syncing from " + source))
+	fmt.Println(warnStyle.Render("The following core files will be overwritten. Any local modifications will be lost:"))
 	for _, p := range paths {
 		fmt.Println(pathStyle.Render("  " + p))
 	}

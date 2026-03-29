@@ -267,6 +267,16 @@ project:
   name: ""
 `
 
+var manifestWithAgents = `version: "1.0"
+agents:
+  - name: kernel
+    path: .agentic/agents/kernel
+  - name: personal
+    path: .agentic/agents/personal
+  - name: work
+    path: .agentic/agents/work
+`
+
 func TestFetch(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -333,6 +343,33 @@ func TestFetch(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: ".gitkeep files are skipped without download but directory is created",
+			downloader: &mockDownloader{
+				tree: []string{
+					"AGENTS.md",
+					".agentic/manifest.yml",
+					".agentic/agents/kernel/memories/.gitkeep",
+					".agentic/agents/kernel/notes/.gitkeep",
+				},
+				files: map[string][]byte{
+					"AGENTS.md":             []byte(minimalAgentsMD),
+					".agentic/manifest.yml": []byte(minimalManifest),
+					// no entries for .gitkeep -- download must not be called for them
+				},
+			},
+			check: func(t *testing.T, k *KernelInfo) {
+				assert.NotEmpty(t, k.CacheDir)
+				// directories should exist even though .gitkeep was not downloaded
+				_, err := os.Stat(filepath.Join(k.CacheDir, ".agentic", "agents", "kernel", "memories"))
+				assert.NoError(t, err, "memories dir should be created")
+				_, err = os.Stat(filepath.Join(k.CacheDir, ".agentic", "agents", "kernel", "notes"))
+				assert.NoError(t, err, "notes dir should be created")
+				// the .gitkeep files themselves should not exist in cache
+				_, err = os.Stat(filepath.Join(k.CacheDir, ".agentic", "agents", "kernel", "memories", ".gitkeep"))
+				assert.True(t, os.IsNotExist(err), ".gitkeep should not be written to cache")
+			},
+		},
+		{
 			name: "non-kernel paths filtered out",
 			downloader: &mockDownloader{
 				tree: []string{
@@ -352,6 +389,42 @@ func TestFetch(t *testing.T) {
 				// README.md and LICENSE.md should NOT be in the cache
 				_, err := readFile(k.CacheDir + "/README.md")
 				assert.Error(t, err, "README.md should not be cached")
+			},
+		},
+		{
+			name: "agent paths populated from manifest",
+			downloader: &mockDownloader{
+				tree: []string{
+					"AGENTS.md",
+					".agentic/manifest.yml",
+				},
+				files: map[string][]byte{
+					"AGENTS.md":             []byte(minimalAgentsMD),
+					".agentic/manifest.yml": []byte(manifestWithAgents),
+				},
+			},
+			check: func(t *testing.T, k *KernelInfo) {
+				assert.Equal(t, []string{
+					".agentic/agents/kernel",
+					".agentic/agents/personal",
+					".agentic/agents/work",
+				}, k.AgentPaths)
+			},
+		},
+		{
+			name: "agent paths empty when manifest has no agents",
+			downloader: &mockDownloader{
+				tree: []string{
+					"AGENTS.md",
+					".agentic/manifest.yml",
+				},
+				files: map[string][]byte{
+					"AGENTS.md":             []byte(minimalAgentsMD),
+					".agentic/manifest.yml": []byte(minimalManifest),
+				},
+			},
+			check: func(t *testing.T, k *KernelInfo) {
+				assert.Empty(t, k.AgentPaths)
 			},
 		},
 	}
@@ -376,6 +449,61 @@ func TestFetch(t *testing.T) {
 
 			if tt.check != nil {
 				tt.check(t, k)
+			}
+		})
+	}
+}
+
+// --- AgentPathsFromManifest ---
+
+func TestAgentPathsFromManifest(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    []string
+		wantErr bool
+	}{
+		{
+			name:    "returns agent paths from manifest",
+			content: manifestWithAgents,
+			want: []string{
+				".agentic/agents/kernel",
+				".agentic/agents/personal",
+				".agentic/agents/work",
+			},
+		},
+		{
+			name:    "no agents returns empty slice",
+			content: minimalManifest,
+			want:    []string{},
+		},
+		{
+			name:    "agents with empty path skipped",
+			content: "agents:\n  - name: broken\n    path: \"\"\n  - name: ok\n    path: .agentic/agents/ok\n",
+			want:    []string{".agentic/agents/ok"},
+		},
+		{
+			name:    "file not found returns error",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "manifest.yml")
+			if tt.content != "" {
+				require.NoError(t, os.WriteFile(path, []byte(tt.content), 0644))
+			}
+			got, err := AgentPathsFromManifest(path)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if tt.want == nil {
+				assert.Empty(t, got)
+			} else {
+				assert.Equal(t, tt.want, got)
 			}
 		})
 	}

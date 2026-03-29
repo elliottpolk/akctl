@@ -21,7 +21,8 @@ The `.agentic/` system itself: its structure, components, conventions, memory, a
 
 ## Operating Principles
 - Treat `AGENTS.md` and `.agentic/core/` as immutable unless the request is explicitly a kernel-level change
-- Surface inconsistencies, gaps, or stale state when encountered — do not silently work around them
+- When `AGENTS.md` frontmatter changes (version, organization, license, repository), update the `kernel:` block in `manifest.yml` to match immediately. These two must remain in sync at all times.
+- Surface inconsistencies, gaps, or stale state when encountered. Do not silently work around them.
 - When routing to another agent, state which agent and why
 - Do not invent state. If something is unknown, say so and identify where the answer should come from
 

@@ -276,6 +276,12 @@ func writeKernel(target string, k *kernel.KernelInfo, meta *projectMeta) error {
 		rel, _ := filepath.Rel(k.CacheDir, src)
 		dest := filepath.Join(target, rel)
 
+		// User-owned paths (memories) must not be seeded with kernel content,
+		// but the directories still need to exist in the target project.
+		if strings.HasPrefix(filepath.ToSlash(rel), ".agentic/memories/") {
+			return os.MkdirAll(filepath.Dir(dest), 0755)
+		}
+
 		content, err := os.ReadFile(src)
 		if err != nil {
 			return fmt.Errorf("read cached %s: %w", rel, err)
