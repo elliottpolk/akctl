@@ -119,6 +119,23 @@ func main() {
 					return cli.Exit("not implemented yet", 1)
 				},
 			},
+			{
+				Name:        "sync",
+				Aliases:     []string{"update"},
+				Description: "Sync the project/directory agentic kernel with the latest version and updates",
+				Flags: []cli.Flag{
+					logLevelFlag,
+					logFormatFlag,
+				},
+				Action: func(c *cli.Context) error {
+					logger, done := setupLogger(c)
+					defer done(time.Now())
+
+					logger.Info("stubbed command executed", "command", "sync")
+
+					return cli.Exit("not implemented yet", 1)
+				},
+			},
 		},
 	}
 
