@@ -409,10 +409,8 @@ func TestRun_normalSync(t *testing.T) {
 
 	// Stub confirmFn and warnFn.
 	orig := confirmFn
-	origWarn := warnFn
-	confirmFn = func(bool) (bool, error) { return true, nil }
-	warnFn = func(string, []string) {}
-	defer func() { confirmFn = orig; warnFn = origWarn }()
+	confirmFn = func(bool, string, []string) (bool, error) { return true, nil }
+	defer func() { confirmFn = orig }()
 
 	err := runWithCache(dir, upstreamCache)
 	require.NoError(t, err)
@@ -433,10 +431,8 @@ func TestRun_normalSync(t *testing.T) {
 func TestRun_abortWhenAbsent(t *testing.T) {
 	dir := t.TempDir()
 	orig := confirmFn
-	origWarn := warnFn
-	confirmFn = func(bool) (bool, error) { return true, nil }
-	warnFn = func(string, []string) {}
-	defer func() { confirmFn = orig; warnFn = origWarn }()
+	confirmFn = func(bool, string, []string) (bool, error) { return true, nil }
+	defer func() { confirmFn = orig }()
 
 	err := runWithCache(dir, t.TempDir())
 	require.Error(t, err)
@@ -450,10 +446,8 @@ func TestRun_confirmRejected(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".agentic", "manifest.yml"), manifestYML("https://github.com/elliottpolk/agentic-kernel"), 0644))
 
 	orig := confirmFn
-	origWarn := warnFn
-	confirmFn = func(bool) (bool, error) { return false, nil }
-	warnFn = func(string, []string) {}
-	defer func() { confirmFn = orig; warnFn = origWarn }()
+	confirmFn = func(bool, string, []string) (bool, error) { return false, nil }
+	defer func() { confirmFn = orig }()
 
 	err := runWithCache(dir, makeUpstreamCache(t))
 	require.Error(t, err)
@@ -479,9 +473,7 @@ func runWithCache(targetDir, cacheDir string) error {
 		return err
 	}
 
-	warnFn("", coreFiles)
-
-	ok, err := confirmFn(false)
+	ok, err := confirmFn(false, "", coreFiles)
 	if err != nil {
 		return err
 	}

@@ -40,9 +40,8 @@ var (
 )
 
 var (
-	// confirmFn and warnFn are vars so tests can inject non-interactive stubs.
+	// confirmFn is a var so tests can inject non-interactive stubs.
 	confirmFn = confirm
-	warnFn    = func(source string, paths []string) { printWarning(source, paths) }
 )
 
 // Run is the top-level sync orchestration entry point.
@@ -88,14 +87,12 @@ func Run(ctx context.Context, client *gogithub.Client, opts Options) error {
 		return nil
 	}
 
-	warnFn(repoURL, coreFiles)
-
 	// Recovery mode: inform user before proceeding.
-	if state == StateAgentsMDOnly || state == StateAgenticOnly {
+	if (state == StateAgentsMDOnly || state == StateAgenticOnly) && !opts.Force {
 		fmt.Println(ui.WarnStyle.Render("Partial installation detected. Sync will repair missing artifacts."))
 	}
 
-	ok, err := confirmFn(opts.Force)
+	ok, err := confirmFn(opts.Force, repoURL, coreFiles)
 	if err != nil {
 		return fmt.Errorf("confirm: %w", err)
 	}
@@ -458,27 +455,25 @@ func rollback(cacheDir, dir string) error {
 	return os.RemoveAll(cacheDir)
 }
 
-// printWarning displays the upstream kernel source and the list of files
-// that will be destructively overwritten.
-func printWarning(source string, paths []string) {
-	fmt.Println(ui.WarnStyle.Render("WARNING: Syncing from " + source))
-	fmt.Println(ui.WarnStyle.Render("The following core files will be overwritten. Any local modifications will be lost:"))
-	for _, p := range paths {
-		fmt.Println(ui.PathStyle.Render("  " + p))
-	}
-	fmt.Println()
-}
-
 // confirm prompts for explicit confirmation unless force is set.
-func confirm(force bool) (bool, error) {
+func confirm(force bool, source string, paths []string) (bool, error) {
 	if force {
 		return true, nil
 	}
+
+	var sb strings.Builder
+	for _, p := range paths {
+		sb.WriteString("  • " + p + "\n")
+	}
+
 	var ok bool
 	form := huh.NewForm(
 		huh.NewGroup(
+			huh.NewNote().
+				Title("Syncing from " + source).
+				Description("The following core files will be overwritten. Any local modifications will be lost:\n\n" + sb.String()),
 			huh.NewConfirm().
-				Title("Core files will be permanently overwritten. Proceed?").
+				Title("Proceed with sync?").
 				Affirmative("Yes").
 				Negative("No").
 				Value(&ok),

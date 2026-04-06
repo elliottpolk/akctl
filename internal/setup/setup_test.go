@@ -154,39 +154,6 @@ func TestGenDestructList(t *testing.T) {
 	}
 }
 
-// --- showDestructList ---
-
-func TestShowDestructList(t *testing.T) {
-	// These tests verify showDestructList does not panic under any input.
-	// Output goes to stdout; we test behaviour not the rendered bytes.
-	t.Run("empty paths pretty", func(t *testing.T) {
-		assert.NotPanics(t, func() { showDestructList(nil, true) })
-	})
-	t.Run("empty paths plain", func(t *testing.T) {
-		assert.NotPanics(t, func() { showDestructList(nil, false) })
-	})
-	t.Run("single path pretty", func(t *testing.T) {
-		assert.NotPanics(t, func() {
-			showDestructList([]string{"/tmp/foo/AGENTS.md"}, true)
-		})
-	})
-	t.Run("multiple paths same dir pretty", func(t *testing.T) {
-		assert.NotPanics(t, func() {
-			showDestructList([]string{"/tmp/foo/a.md", "/tmp/foo/b.md"}, true)
-		})
-	})
-	t.Run("multiple paths different dirs pretty", func(t *testing.T) {
-		assert.NotPanics(t, func() {
-			showDestructList([]string{"/tmp/foo/AGENTS.md", "/tmp/foo/.agentic/manifest.yml"}, true)
-		})
-	})
-	t.Run("paths plain", func(t *testing.T) {
-		assert.NotPanics(t, func() {
-			showDestructList([]string{"/tmp/foo/AGENTS.md", "/tmp/foo/.agentic/manifest.yml"}, false)
-		})
-	})
-}
-
 // --- destroyConflicts ---
 
 func TestDestroyConflicts(t *testing.T) {
@@ -261,7 +228,7 @@ func TestDestroyConflicts(t *testing.T) {
 
 func TestConfirmOverwrite(t *testing.T) {
 	t.Run("force=true skips prompt", func(t *testing.T) {
-		ok, err := confirmOverwrite(true)
+		ok, err := confirmOverwrite(true, nil)
 		assert.NoError(t, err)
 		assert.True(t, ok)
 	})
@@ -577,7 +544,7 @@ project:
 		name          string
 		setup         func(dir string)
 		opts          func(dir string) Options
-		overrideConfirm func(force bool) (bool, error)
+		overrideConfirm func(force bool, paths []string) (bool, error)
 		wantErr       bool
 		errContains   string
 		check         func(t *testing.T, dir string)
@@ -616,7 +583,7 @@ project:
 				os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("old"), 0644)
 			},
 			opts: func(dir string) Options { return Options{TargetDir: dir, Force: false} },
-			overrideConfirm: func(force bool) (bool, error) { return false, nil },
+			overrideConfirm: func(force bool, paths []string) (bool, error) { return false, nil },
 			wantErr:     true,
 			errContains: "aborted",
 		},
@@ -626,7 +593,7 @@ project:
 				os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("old"), 0644)
 			},
 			opts: func(dir string) Options { return Options{TargetDir: dir, Force: false} },
-			overrideConfirm: func(force bool) (bool, error) {
+			overrideConfirm: func(force bool, paths []string) (bool, error) {
 				return false, fmt.Errorf("terminal error")
 			},
 			wantErr:     true,
