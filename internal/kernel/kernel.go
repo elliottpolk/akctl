@@ -13,8 +13,8 @@ import (
 	"github.com/google/go-github/v84/github"
 )
 
-// Agent is a minimal typed view of an agent entry in .agentic/manifest.yml.
-type Agent struct {
+// Component is a minimal typed view of an agent, workflow, or skill entry in .agentic/manifest.yml.
+type Component struct {
 	Name string `yaml:"name"`
 	Path string `yaml:"path"`
 }
@@ -26,7 +26,9 @@ type Manifest struct {
 		Repository string `yaml:"repository"`
 		Version    string `yaml:"version"`
 	} `yaml:"kernel"`
-	Agents []Agent `yaml:"agents"`
+	Agents    []Component `yaml:"agents"`
+	Workflows []Component `yaml:"workflows"`
+	Skills    []Component `yaml:"skills"`
 }
 
 // manifestRepo reads .agentic/manifest.yml from targetDir and returns the
@@ -81,10 +83,10 @@ type KernelInfo struct {
 	AgentPaths []string
 }
 
-// AgentPathsFromManifest reads a manifest.yml file and returns the path value
-// for each declared agent. Empty or whitespace-only paths are skipped. An
-// error is returned only when the file cannot be read or parsed.
-func AgentPathsFromManifest(manifestPath string) ([]string, error) {
+// ComponentPathsFromManifest reads a manifest.yml file and returns the path value
+// for each declared agent, workflow, and skill. Empty or whitespace-only paths
+// are skipped. An error is returned only when the file cannot be read or parsed.
+func ComponentPathsFromManifest(manifestPath string) ([]string, error) {
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return nil, fmt.Errorf("read manifest: %w", err)
@@ -93,9 +95,19 @@ func AgentPathsFromManifest(manifestPath string) ([]string, error) {
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
-	paths := make([]string, 0, len(m.Agents))
+	var paths []string
 	for _, a := range m.Agents {
 		if p := strings.TrimSpace(a.Path); p != "" {
+			paths = append(paths, filepath.ToSlash(p))
+		}
+	}
+	for _, w := range m.Workflows {
+		if p := strings.TrimSpace(w.Path); p != "" {
+			paths = append(paths, filepath.ToSlash(p))
+		}
+	}
+	for _, s := range m.Skills {
+		if p := strings.TrimSpace(s.Path); p != "" {
 			paths = append(paths, filepath.ToSlash(p))
 		}
 	}
@@ -211,7 +223,7 @@ func fetch(ctx context.Context, d downloader) (*KernelInfo, error) {
 
 	// Extract agent paths from the cached manifest so sync can derive
 	// user-owned directories dynamically for any kernel structure.
-	agentPaths, _ := AgentPathsFromManifest(filepath.Join(cacheDir, ".agentic", "manifest.yml"))
+	agentPaths, _ := ComponentPathsFromManifest(filepath.Join(cacheDir, ".agentic", "manifest.yml"))
 
 	return &KernelInfo{
 		Version:      fm["version"],

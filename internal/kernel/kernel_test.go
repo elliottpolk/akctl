@@ -267,7 +267,7 @@ project:
   name: ""
 `
 
-var manifestWithAgents = `version: "1.0"
+var manifestWithComponents = `version: "1.0"
 agents:
   - name: kernel
     path: .agentic/agents/kernel
@@ -275,6 +275,12 @@ agents:
     path: .agentic/agents/personal
   - name: work
     path: .agentic/agents/work
+workflows:
+  - name: spec
+    path: .agentic/workflows/spec
+skills:
+  - name: gemini-bridge
+    path: .agentic/skills/gemini-bridge
 `
 
 func TestFetch(t *testing.T) {
@@ -400,7 +406,7 @@ func TestFetch(t *testing.T) {
 				},
 				files: map[string][]byte{
 					"AGENTS.md":             []byte(minimalAgentsMD),
-					".agentic/manifest.yml": []byte(manifestWithAgents),
+					".agentic/manifest.yml": []byte(manifestWithComponents),
 				},
 			},
 			check: func(t *testing.T, k *KernelInfo) {
@@ -408,6 +414,8 @@ func TestFetch(t *testing.T) {
 					".agentic/agents/kernel",
 					".agentic/agents/personal",
 					".agentic/agents/work",
+					".agentic/workflows/spec",
+					".agentic/skills/gemini-bridge",
 				}, k.AgentPaths)
 			},
 		},
@@ -454,9 +462,9 @@ func TestFetch(t *testing.T) {
 	}
 }
 
-// --- AgentPathsFromManifest ---
+// --- ComponentPathsFromManifest ---
 
-func TestAgentPathsFromManifest(t *testing.T) {
+func TestComponentPathsFromManifest(t *testing.T) {
 	tests := []struct {
 		name    string
 		content string
@@ -464,21 +472,23 @@ func TestAgentPathsFromManifest(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:    "returns agent paths from manifest",
-			content: manifestWithAgents,
+			name:    "returns all component paths from manifest",
+			content: manifestWithComponents,
 			want: []string{
 				".agentic/agents/kernel",
 				".agentic/agents/personal",
 				".agentic/agents/work",
+				".agentic/workflows/spec",
+				".agentic/skills/gemini-bridge",
 			},
 		},
 		{
-			name:    "no agents returns empty slice",
+			name:    "no components returns empty slice",
 			content: minimalManifest,
-			want:    []string{},
+			want:    nil,
 		},
 		{
-			name:    "agents with empty path skipped",
+			name:    "components with empty path skipped",
 			content: "agents:\n  - name: broken\n    path: \"\"\n  - name: ok\n    path: .agentic/agents/ok\n",
 			want:    []string{".agentic/agents/ok"},
 		},
@@ -494,7 +504,7 @@ func TestAgentPathsFromManifest(t *testing.T) {
 			if tt.content != "" {
 				require.NoError(t, os.WriteFile(path, []byte(tt.content), 0644))
 			}
-			got, err := AgentPathsFromManifest(path)
+			got, err := ComponentPathsFromManifest(path)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return

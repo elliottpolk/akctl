@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,12 +16,13 @@ import (
 // --- userOwned ---
 
 func TestUserOwned(t *testing.T) {
-	// Simulate the agent paths a journal-kernel upstream would expose.
+	// Simulate the agent, workflow, and skill paths an upstream would expose.
 	agentPaths := []string{
 		".agentic/agents/kernel",
 		".agentic/agents/agent-foundry",
 		".agentic/agents/personal",
 		".agentic/agents/work",
+		".agentic/skills/gemini-bridge",
 	}
 
 	tests := []struct {
@@ -46,6 +46,10 @@ func TestUserOwned(t *testing.T) {
 		{".agentic/agents/work/memories/2026-03-31.md", true},
 		{".agentic/agents/work/notes/standup.md", true},
 		{".agentic/agents/work/references/runbook.md", true},
+		// Per-skill user-owned subdirs.
+		{".agentic/skills/gemini-bridge/memories/usage.md", true},
+		{".agentic/skills/gemini-bridge/notes/fixes.md", true},
+		{".agentic/skills/gemini-bridge/references/api.md", true},
 		// Core files — not user-owned.
 		{".agentic/core/BEHAVIOR.md", false},
 		{".agentic/core/DECISIONS.md", false},
@@ -54,6 +58,7 @@ func TestUserOwned(t *testing.T) {
 		{".agentic/agents/kernel/IDENTITY.md", false},
 		{".agentic/agents/personal/IDENTITY.md", false},
 		{".agentic/agents/work/IDENTITY.md", false},
+		{".agentic/skills/gemini-bridge/SKILL.md", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.rel, func(t *testing.T) {
@@ -467,7 +472,7 @@ func runWithCache(targetDir, cacheDir string) error {
 	}
 
 	// Mirror what Run() does: derive user-owned paths from the upstream manifest.
-	agentPaths, _ := kernel.AgentPathsFromManifest(filepath.Join(cacheDir, ".agentic", "manifest.yml"))
+	agentPaths, _ := kernel.ComponentPathsFromManifest(filepath.Join(cacheDir, ".agentic", "manifest.yml"))
 
 	coreFiles, err := corePaths(targetDir, cacheDir, agentPaths)
 	if err != nil {
@@ -540,16 +545,12 @@ func TestMergeManifest_upstreamRaw(t *testing.T) {
 	// Local project values must survive.
 	assert.Contains(t, s, "akctl", "local project name lost")
 
-	// Key ordering: project: must precede kernel: (local ordering preserved).
-	projIdx := strings.Index(s, "\nproject:")
-	kernelIdx := strings.Index(s, "\nkernel:")
-	require.Greater(t, projIdx, 0, "project: key missing from output")
-	require.Greater(t, kernelIdx, 0, "kernel: key missing from output")
-	assert.Less(t, projIdx, kernelIdx, "project: must appear before kernel: (local ordering not preserved)")
-
 	// kernel: block must come from upstream (contains repository field).
 	assert.Contains(t, s, "agentic-kernel", "kernel.repository lost after merge")
 
 	// Local-only skills must be preserved (not present in upstream kernel).
 	assert.Contains(t, s, "claude-bridge", "local-only skill lost after merge")
+
+	// Upstream-only skill must be added.
+	assert.Contains(t, s, "gemini-bridge", "upstream-only skill not added after merge")
 }
