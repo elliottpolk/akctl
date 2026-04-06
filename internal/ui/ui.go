@@ -46,7 +46,7 @@ func (t *TeaProgressReporter) Start(title string, total int) {
 		total:    total,
 	}
 
-	t.prog = tea.NewProgram(m, tea.WithOutput(os.Stderr))
+	t.prog = tea.NewProgram(m, tea.WithOutput(os.Stderr), tea.WithAltScreen())
 	go func() {
 		if _, err := t.prog.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error running progress: %v\n", err)

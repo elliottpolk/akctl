@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
+	tea "github.com/charmbracelet/bubbletea"
 	gogithub "github.com/google/go-github/v84/github"
 	"gopkg.in/yaml.v3"
 
@@ -482,7 +483,7 @@ func confirm(force bool) (bool, error) {
 				Negative("No").
 				Value(&ok),
 		),
-	).WithTheme(huh.ThemeCharm())
+	).WithTheme(huh.ThemeCharm()).WithProgramOptions(tea.WithAltScreen())
 	if err := form.Run(); err != nil {
 		return false, err
 	}
