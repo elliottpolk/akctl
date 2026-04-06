@@ -10,11 +10,11 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/lipgloss"
 	gogithub "github.com/google/go-github/v84/github"
 	"gopkg.in/yaml.v3"
 
 	"github.com/elliottpolk/akctl/internal/kernel"
+	"github.com/elliottpolk/akctl/internal/ui"
 )
 
 // State represents the detected installation state of the agentic kernel.
@@ -39,9 +39,6 @@ var (
 )
 
 var (
-	warnStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))
-	pathStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-
 	// confirmFn and warnFn are vars so tests can inject non-interactive stubs.
 	confirmFn = confirm
 	warnFn    = func(source string, paths []string) { printWarning(source, paths) }
@@ -67,7 +64,12 @@ func Run(ctx context.Context, client *gogithub.Client, opts Options) error {
 		return fmt.Errorf("parse repository: %w", err)
 	}
 
-	k, err := kernel.Fetch(ctx, client, owner, repo)
+	var reporter kernel.ProgressReporter
+	if !opts.Force {
+		reporter = ui.NewTeaProgressReporter()
+	}
+
+	k, err := kernel.Fetch(ctx, client, owner, repo, reporter)
 	if err != nil {
 		return fmt.Errorf("fetch upstream kernel: %w", err)
 	}
@@ -84,7 +86,7 @@ func Run(ctx context.Context, client *gogithub.Client, opts Options) error {
 
 	// Recovery mode: inform user before proceeding.
 	if state == StateAgentsMDOnly || state == StateAgenticOnly {
-		fmt.Println(warnStyle.Render("Partial installation detected. Sync will repair missing artifacts."))
+		fmt.Println(ui.WarnStyle.Render("Partial installation detected. Sync will repair missing artifacts."))
 	}
 
 	ok, err := confirmFn(opts.Force)
@@ -420,10 +422,10 @@ func rollback(cacheDir, dir string) error {
 // printWarning displays the upstream kernel source and the list of files
 // that will be destructively overwritten.
 func printWarning(source string, paths []string) {
-	fmt.Println(warnStyle.Render("WARNING: Syncing from " + source))
-	fmt.Println(warnStyle.Render("The following core files will be overwritten. Any local modifications will be lost:"))
+	fmt.Println(ui.WarnStyle.Render("WARNING: Syncing from " + source))
+	fmt.Println(ui.WarnStyle.Render("The following core files will be overwritten. Any local modifications will be lost:"))
 	for _, p := range paths {
-		fmt.Println(pathStyle.Render("  " + p))
+		fmt.Println(ui.PathStyle.Render("  " + p))
 	}
 	fmt.Println()
 }

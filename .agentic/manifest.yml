@@ -52,6 +52,9 @@ skills:
   - name: claude-bridge
     description: Bridges .agentic agents, skills, and workflows into Claude Code and Cowork. Produces thin wrapper files referencing canonical sources.
     path: .agentic/skills/claude-bridge
+  - name: gemini-bridge
+    description: Bridges .agentic agents, skills, and workflows into Gemini CLI. Produces thin wrapper files referencing canonical sources. Use to make any .agentic component available in Gemini CLI.
+    path: .agentic/skills/gemini-bridge
   - name: create-skill
     description: Create a new agent skill following the agentskills.io specification. Use when asked to create a new skill, add a skill to this workspace, or package agent instructions as a reusable, shareable skill.
     path: .agentic/skills/create-skill

@@ -13,8 +13,8 @@ import (
 	"github.com/google/go-github/v84/github"
 )
 
-// Agent is a minimal typed view of an agent entry in .agentic/manifest.yml.
-type Agent struct {
+// Component is a minimal typed view of an agent, workflow, or skill entry in .agentic/manifest.yml.
+type Component struct {
 	Name string `yaml:"name"`
 	Path string `yaml:"path"`
 }
@@ -26,7 +26,9 @@ type Manifest struct {
 		Repository string `yaml:"repository"`
 		Version    string `yaml:"version"`
 	} `yaml:"kernel"`
-	Agents []Agent `yaml:"agents"`
+	Agents    []Component `yaml:"agents"`
+	Workflows []Component `yaml:"workflows"`
+	Skills    []Component `yaml:"skills"`
 }
 
 // manifestRepo reads .agentic/manifest.yml from targetDir and returns the
@@ -81,10 +83,10 @@ type KernelInfo struct {
 	AgentPaths []string
 }
 
-// AgentPathsFromManifest reads a manifest.yml file and returns the path value
-// for each declared agent. Empty or whitespace-only paths are skipped. An
-// error is returned only when the file cannot be read or parsed.
-func AgentPathsFromManifest(manifestPath string) ([]string, error) {
+// ComponentPathsFromManifest reads a manifest.yml file and returns the path value
+// for each declared agent, workflow, and skill. Empty or whitespace-only paths
+// are skipped. An error is returned only when the file cannot be read or parsed.
+func ComponentPathsFromManifest(manifestPath string) ([]string, error) {
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return nil, fmt.Errorf("read manifest: %w", err)
@@ -93,9 +95,19 @@ func AgentPathsFromManifest(manifestPath string) ([]string, error) {
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
-	paths := make([]string, 0, len(m.Agents))
+	var paths []string
 	for _, a := range m.Agents {
 		if p := strings.TrimSpace(a.Path); p != "" {
+			paths = append(paths, filepath.ToSlash(p))
+		}
+	}
+	for _, w := range m.Workflows {
+		if p := strings.TrimSpace(w.Path); p != "" {
+			paths = append(paths, filepath.ToSlash(p))
+		}
+	}
+	for _, s := range m.Skills {
+		if p := strings.TrimSpace(s.Path); p != "" {
 			paths = append(paths, filepath.ToSlash(p))
 		}
 	}
@@ -142,16 +154,23 @@ func (d *ghDownloader) download(ctx context.Context, path string) ([]byte, error
 	return io.ReadAll(rc)
 }
 
+// ProgressReporter defines an interface for tracking the progress of kernel fetching.
+type ProgressReporter interface {
+	Start(title string, total int)
+	Inc()
+	Finish(message string)
+}
+
 // Fetch retrieves the upstream kernel from GitHub, writes all relevant files
 // to a temporary directory, and returns a KernelInfo with metadata and the
 // cache path. On any failure the temp dir is removed and the error is returned
 // verbatim. The caller is responsible for os.RemoveAll(k.CacheDir) when done.
-func Fetch(ctx context.Context, client *github.Client, owner, repo string) (*KernelInfo, error) {
-	return fetch(ctx, &ghDownloader{client: client, owner: owner, repo: repo})
+func Fetch(ctx context.Context, client *github.Client, owner, repo string, reporter ProgressReporter) (*KernelInfo, error) {
+	return fetch(ctx, &ghDownloader{client: client, owner: owner, repo: repo}, reporter)
 }
 
 // fetch is the testable core of Fetch -- accepts any downloader implementation.
-func fetch(ctx context.Context, d downloader) (*KernelInfo, error) {
+func fetch(ctx context.Context, d downloader, reporter ProgressReporter) (*KernelInfo, error) {
 	paths, err := d.getTree(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch kernel tree: %w", err)
@@ -160,6 +179,18 @@ func fetch(ctx context.Context, d downloader) (*KernelInfo, error) {
 	cacheDir, err := os.MkdirTemp("", "akctl-kernel-*")
 	if err != nil {
 		return nil, fmt.Errorf("create cache dir: %w", err)
+	}
+
+	if reporter != nil {
+		count := 0
+		for _, p := range paths {
+			if p == "AGENTS.md" || strings.HasPrefix(p, ".agentic/") {
+				if filepath.Base(p) != ".gitkeep" {
+					count++
+				}
+			}
+		}
+		reporter.Start("Fetching upstream kernel...", count)
 	}
 
 	var agentsMDContent []byte
@@ -196,6 +227,14 @@ func fetch(ctx context.Context, d downloader) (*KernelInfo, error) {
 		if p == "AGENTS.md" {
 			agentsMDContent = content
 		}
+
+		if reporter != nil {
+			reporter.Inc()
+		}
+	}
+
+	if reporter != nil {
+		reporter.Finish("")
 	}
 
 	if agentsMDContent == nil {
@@ -211,7 +250,7 @@ func fetch(ctx context.Context, d downloader) (*KernelInfo, error) {
 
 	// Extract agent paths from the cached manifest so sync can derive
 	// user-owned directories dynamically for any kernel structure.
-	agentPaths, _ := AgentPathsFromManifest(filepath.Join(cacheDir, ".agentic", "manifest.yml"))
+	agentPaths, _ := ComponentPathsFromManifest(filepath.Join(cacheDir, ".agentic", "manifest.yml"))
 
 	return &KernelInfo{
 		Version:      fm["version"],
