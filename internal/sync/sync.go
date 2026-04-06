@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
+	tea "github.com/charmbracelet/bubbletea"
 	gogithub "github.com/google/go-github/v84/github"
 	"gopkg.in/yaml.v3"
 
@@ -39,9 +40,8 @@ var (
 )
 
 var (
-	// confirmFn and warnFn are vars so tests can inject non-interactive stubs.
+	// confirmFn is a var so tests can inject non-interactive stubs.
 	confirmFn = confirm
-	warnFn    = func(source string, paths []string) { printWarning(source, paths) }
 )
 
 // Run is the top-level sync orchestration entry point.
@@ -82,14 +82,17 @@ func Run(ctx context.Context, client *gogithub.Client, opts Options) error {
 		return fmt.Errorf("resolve core paths: %w", err)
 	}
 
-	warnFn(repoURL, coreFiles)
+	if len(coreFiles) == 0 {
+		fmt.Println(ui.SuccessStyle.Render("Everything is already up to date."))
+		return nil
+	}
 
 	// Recovery mode: inform user before proceeding.
-	if state == StateAgentsMDOnly || state == StateAgenticOnly {
+	if (state == StateAgentsMDOnly || state == StateAgenticOnly) && !opts.Force {
 		fmt.Println(ui.WarnStyle.Render("Partial installation detected. Sync will repair missing artifacts."))
 	}
 
-	ok, err := confirmFn(opts.Force)
+	ok, err := confirmFn(opts.Force, repoURL, coreFiles)
 	if err != nil {
 		return fmt.Errorf("confirm: %w", err)
 	}
@@ -180,8 +183,9 @@ func userOwned(rel string, agentPaths []string) bool {
 }
 
 // corePaths returns the list of relative paths (from dir) that sync will
-// overwrite -- the intersection of upstream cache files and non-user-owned paths.
-// agentPaths is forwarded to userOwned to derive protected paths dynamically.
+// overwrite -- the intersection of upstream cache files and non-user-owned paths
+// that have actually changed. agentPaths is forwarded to userOwned to derive
+// protected paths dynamically.
 func corePaths(dir, cacheDir string, agentPaths []string) ([]string, error) {
 	var paths []string
 	err := filepath.WalkDir(cacheDir, func(src string, d fs.DirEntry, err error) error {
@@ -190,9 +194,41 @@ func corePaths(dir, cacheDir string, agentPaths []string) ([]string, error) {
 		}
 		rel, _ := filepath.Rel(cacheDir, src)
 		rel = filepath.ToSlash(rel)
-		if !userOwned(rel, agentPaths) {
+		if userOwned(rel, agentPaths) {
+			return nil
+		}
+
+		// Check if file actually changed
+		dst := filepath.Join(dir, filepath.FromSlash(rel))
+		localData, err := os.ReadFile(dst)
+		if os.IsNotExist(err) {
+			paths = append(paths, rel)
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		upstreamData, err := os.ReadFile(src)
+		if err != nil {
+			return err
+		}
+
+		if rel == filepath.ToSlash(filepath.Join(".agentic", "manifest.yml")) {
+			mergedData, err := mergeManifest(localData, upstreamData)
+			if err != nil {
+				return err
+			}
+			if !bytes.Equal(localData, mergedData) {
+				paths = append(paths, rel)
+			}
+			return nil
+		}
+
+		if !bytes.Equal(localData, upstreamData) {
 			paths = append(paths, rel)
 		}
+
 		return nil
 	})
 	return paths, err
@@ -419,32 +455,30 @@ func rollback(cacheDir, dir string) error {
 	return os.RemoveAll(cacheDir)
 }
 
-// printWarning displays the upstream kernel source and the list of files
-// that will be destructively overwritten.
-func printWarning(source string, paths []string) {
-	fmt.Println(ui.WarnStyle.Render("WARNING: Syncing from " + source))
-	fmt.Println(ui.WarnStyle.Render("The following core files will be overwritten. Any local modifications will be lost:"))
-	for _, p := range paths {
-		fmt.Println(ui.PathStyle.Render("  " + p))
-	}
-	fmt.Println()
-}
-
 // confirm prompts for explicit confirmation unless force is set.
-func confirm(force bool) (bool, error) {
+func confirm(force bool, source string, paths []string) (bool, error) {
 	if force {
 		return true, nil
 	}
+
+	var sb strings.Builder
+	for _, p := range paths {
+		sb.WriteString("  • " + p + "\n")
+	}
+
 	var ok bool
 	form := huh.NewForm(
 		huh.NewGroup(
+			huh.NewNote().
+				Title("Syncing from " + source).
+				Description("The following core files will be overwritten. Any local modifications will be lost:\n\n" + sb.String()),
 			huh.NewConfirm().
-				Title("Core files will be permanently overwritten. Proceed?").
+				Title("Proceed with sync?").
 				Affirmative("Yes").
 				Negative("No").
 				Value(&ok),
 		),
-	)
+	).WithTheme(huh.ThemeCharm()).WithProgramOptions(tea.WithAltScreen())
 	if err := form.Run(); err != nil {
 		return false, err
 	}

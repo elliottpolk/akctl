@@ -11,9 +11,9 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/elliottpolk/akctl/internal/kernel"
-	"github.com/elliottpolk/akctl/internal/ui"
 )
 
 // Options controls init behavior.
@@ -50,9 +50,7 @@ func Run(k *kernel.KernelInfo, opts Options) error {
 
 	if agentsmd || dotagentic {
 		paths := genDestructList(target, agentsmd, dotagentic)
-		showDestructList(paths, true)
-
-		ok, err := confirmFn(opts.Force)
+		ok, err := confirmFn(opts.Force, paths)
 		if err != nil {
 			return fmt.Errorf("confirm: %w", err)
 		}
@@ -111,61 +109,31 @@ func genDestructList(target string, agentsmd, dotagentic bool) []string {
 	return paths
 }
 
-// showDestructList prints the files that will be destroyed.
-// pretty=true renders a tree-like hierarchy; pretty=false prints plain lines.
-func showDestructList(paths []string, pretty bool) {
-	fmt.Println(ui.WarnStyle.Render("The following will be permanently destroyed:"))
-
-	if !pretty {
-		for _, p := range paths {
-			fmt.Println(ui.PathStyle.Render("  " + p))
-		}
-		return
-	}
-
-	// Build a simple tree: group by directory, then list files.
-	type entry struct {
-		dir  string
-		file string
-	}
-	var entries []entry
-	for _, p := range paths {
-		entries = append(entries, entry{dir: filepath.Dir(p), file: filepath.Base(p)})
-	}
-
-	printed := map[string]bool{}
-	for i, e := range entries {
-		if !printed[e.dir] {
-			printed[e.dir] = true
-			fmt.Println(ui.PathStyle.Render("  " + e.dir + "/"))
-		}
-		isLast := i == len(entries)-1 || entries[i+1].dir != e.dir
-		branch := "├── "
-		if isLast {
-			branch = "└── "
-		}
-		fmt.Println(ui.PathStyle.Render("    " + branch + e.file))
-	}
-	fmt.Println()
-}
-
 // confirmOverwrite prompts for explicit confirmation unless force is set.
 // Safe default is false (do not overwrite).
-func confirmOverwrite(force bool) (bool, error) {
+func confirmOverwrite(force bool, paths []string) (bool, error) {
 	if force {
 		return true, nil
+	}
+
+	var sb strings.Builder
+	for _, p := range paths {
+		sb.WriteString("  • " + p + "\n")
 	}
 
 	var ok bool
 	form := huh.NewForm(
 		huh.NewGroup(
+			huh.NewNote().
+				Title("Destructive action").
+				Description("The following files will be permanently destroyed:\n\n" + sb.String()),
 			huh.NewConfirm().
 				Title("This is destructive and cannot be undone. Proceed?").
 				Affirmative("Yes").
 				Negative("No").
 				Value(&ok),
 		),
-	)
+	).WithTheme(huh.ThemeCharm()).WithProgramOptions(tea.WithAltScreen())
 	if err := form.Run(); err != nil {
 		return false, err
 	}
@@ -222,7 +190,7 @@ func collectMeta(defaultName string) (*projectMeta, error) {
 				Placeholder("https://github.com/owner/repo").
 				Value(&m.Repo),
 		),
-	)
+	).WithTheme(huh.ThemeCharm()).WithProgramOptions(tea.WithAltScreen())
 
 	if err := form.Run(); err != nil {
 		return nil, err

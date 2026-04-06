@@ -46,7 +46,7 @@ func (t *TeaProgressReporter) Start(title string, total int) {
 		total:    total,
 	}
 
-	t.prog = tea.NewProgram(m)
+	t.prog = tea.NewProgram(m, tea.WithOutput(os.Stderr), tea.WithAltScreen())
 	go func() {
 		if _, err := t.prog.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error running progress: %v\n", err)
@@ -68,7 +68,8 @@ func (t *TeaProgressReporter) Inc() {
 
 func (t *TeaProgressReporter) Finish(message string) {
 	if t.prog != nil {
-		t.prog.Quit()
+		t.prog.Send(progressMsg(1.0)) // ensure 100% and exit
+		t.prog.Wait()
 		if message != "" {
 			fmt.Println(SuccessStyle.Render(message))
 		}
@@ -94,12 +95,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 	case progressMsg:
-		var cmds []tea.Cmd
 		if msg >= 1.0 {
-			cmds = append(cmds, tea.Quit)
+			return m, tea.Quit
 		}
-		cmds = append(cmds, m.progress.SetPercent(float64(msg)))
-		return m, tea.Batch(cmds...)
+		return m, m.progress.SetPercent(float64(msg))
 	case progress.FrameMsg:
 		progressModel, cmd := m.progress.Update(msg)
 		m.progress = progressModel.(progress.Model)
