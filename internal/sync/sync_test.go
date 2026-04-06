@@ -1,38 +1,63 @@
 package sync
 
 import (
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/elliottpolk/akctl/internal/kernel"
 )
 
 // --- userOwned ---
 
 func TestUserOwned(t *testing.T) {
+	// Simulate the agent paths a journal-kernel upstream would expose.
+	agentPaths := []string{
+		".agentic/agents/kernel",
+		".agentic/agents/agent-foundry",
+		".agentic/agents/personal",
+		".agentic/agents/work",
+	}
+
 	tests := []struct {
 		rel  string
 		want bool
 	}{
+		// Global memories — always user-owned.
 		{".agentic/memories/state/project.md", true},
 		{".agentic/memories/history/2026-03-01.md", true},
+		// Per-agent user-owned subdirs for base kernel agents.
 		{".agentic/agents/kernel/memories/.gitkeep", true},
 		{".agentic/agents/kernel/notes/.gitkeep", true},
 		{".agentic/agents/kernel/references/.gitkeep", true},
 		{".agentic/agents/agent-foundry/memories/.gitkeep", true},
 		{".agentic/agents/agent-foundry/notes/.gitkeep", true},
 		{".agentic/agents/agent-foundry/references/.gitkeep", true},
+		// Per-agent user-owned subdirs for journal-kernel agents.
+		{".agentic/agents/personal/memories/2026-03.md", true},
+		{".agentic/agents/personal/notes/ideas.md", true},
+		{".agentic/agents/personal/references/links.md", true},
+		{".agentic/agents/work/memories/2026-03-31.md", true},
+		{".agentic/agents/work/notes/standup.md", true},
+		{".agentic/agents/work/references/runbook.md", true},
+		// Core files — not user-owned.
 		{".agentic/core/BEHAVIOR.md", false},
 		{".agentic/core/DECISIONS.md", false},
 		{"AGENTS.md", false},
 		{".agentic/manifest.yml", false},
 		{".agentic/agents/kernel/IDENTITY.md", false},
+		{".agentic/agents/personal/IDENTITY.md", false},
+		{".agentic/agents/work/IDENTITY.md", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.rel, func(t *testing.T) {
-			assert.Equal(t, tt.want, userOwned(tt.rel))
+			assert.Equal(t, tt.want, userOwned(tt.rel, agentPaths))
 		})
 	}
 }
@@ -381,7 +406,7 @@ func TestRun_normalSync(t *testing.T) {
 	orig := confirmFn
 	origWarn := warnFn
 	confirmFn = func(bool) (bool, error) { return true, nil }
-	warnFn = func([]string) {}
+	warnFn = func(string, []string) {}
 	defer func() { confirmFn = orig; warnFn = origWarn }()
 
 	err := runWithCache(dir, upstreamCache)
@@ -405,7 +430,7 @@ func TestRun_abortWhenAbsent(t *testing.T) {
 	orig := confirmFn
 	origWarn := warnFn
 	confirmFn = func(bool) (bool, error) { return true, nil }
-	warnFn = func([]string) {}
+	warnFn = func(string, []string) {}
 	defer func() { confirmFn = orig; warnFn = origWarn }()
 
 	err := runWithCache(dir, t.TempDir())
@@ -422,7 +447,7 @@ func TestRun_confirmRejected(t *testing.T) {
 	orig := confirmFn
 	origWarn := warnFn
 	confirmFn = func(bool) (bool, error) { return false, nil }
-	warnFn = func([]string) {}
+	warnFn = func(string, []string) {}
 	defer func() { confirmFn = orig; warnFn = origWarn }()
 
 	err := runWithCache(dir, makeUpstreamCache(t))
@@ -441,12 +466,15 @@ func runWithCache(targetDir, cacheDir string) error {
 		return errAbsentToInit
 	}
 
-	coreFiles, err := corePaths(targetDir, cacheDir)
+	// Mirror what Run() does: derive user-owned paths from the upstream manifest.
+	agentPaths, _ := kernel.AgentPathsFromManifest(filepath.Join(cacheDir, ".agentic", "manifest.yml"))
+
+	coreFiles, err := corePaths(targetDir, cacheDir, agentPaths)
 	if err != nil {
 		return err
 	}
 
-	warnFn(coreFiles)
+	warnFn("", coreFiles)
 
 	ok, err := confirmFn(false)
 	if err != nil {
@@ -470,4 +498,58 @@ func runWithCache(targetDir, cacheDir string) error {
 
 	os.RemoveAll(cache)
 	return nil
+}
+
+// --- mergeManifest against live upstream ---
+
+// TestMergeManifest_upstreamRaw fetches the actual manifest.yml from
+// elliottpolk/agentic-kernel and merges it with this project's local
+// manifest, verifying that comments and key ordering from the local file
+// are fully preserved.
+//
+// The test is skipped when the upstream is unreachable so it does not break
+// offline or CI-restricted environments.
+func TestMergeManifest_upstreamRaw(t *testing.T) {
+	const rawURL = "https://raw.githubusercontent.com/elliottpolk/agentic-kernel/main/.agentic/manifest.yml"
+
+	resp, err := http.Get(rawURL)
+	if err != nil {
+		t.Skipf("upstream unreachable, skipping: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Skipf("upstream returned status %d, skipping", resp.StatusCode)
+	}
+
+	upstream, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	// Use this project's actual manifest as the local input.
+	local, err := os.ReadFile(filepath.Join("..", "..", ".agentic", "manifest.yml"))
+	require.NoError(t, err, "read local .agentic/manifest.yml")
+
+	out, err := mergeManifest(local, upstream)
+	require.NoError(t, err)
+
+	s := string(out)
+
+	// Header comments from the local file must be present.
+	assert.Contains(t, s, "Agentic Kernel Manifest", "header comment lost")
+	assert.Contains(t, s, "Registry of all active components", "header comment lost")
+
+	// Local project values must survive.
+	assert.Contains(t, s, "akctl", "local project name lost")
+
+	// Key ordering: project: must precede kernel: (local ordering preserved).
+	projIdx := strings.Index(s, "\nproject:")
+	kernelIdx := strings.Index(s, "\nkernel:")
+	require.Greater(t, projIdx, 0, "project: key missing from output")
+	require.Greater(t, kernelIdx, 0, "kernel: key missing from output")
+	assert.Less(t, projIdx, kernelIdx, "project: must appear before kernel: (local ordering not preserved)")
+
+	// kernel: block must come from upstream (contains repository field).
+	assert.Contains(t, s, "agentic-kernel", "kernel.repository lost after merge")
+
+	// Local-only skills must be preserved (not present in upstream kernel).
+	assert.Contains(t, s, "claude-bridge", "local-only skill lost after merge")
 }

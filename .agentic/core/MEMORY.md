@@ -2,6 +2,21 @@
 
 How agents write, update, and organize memory files. Apply this before writing anything to `.agentic/memories/`.
 
+## Platform Memory Hierarchy
+
+Some platforms provide a vendor-specific memory store (e.g. GitHub Copilot's `/memories/` tool, Claude's memory). These are supplementary. The canonical stores are:
+
+- **Shared:** `.agentic/memories/` (state and history)
+- **Agent-specific:** `.agentic/agents/{name}/memories/`
+
+**Reads:** Read from the appropriate `.agentic/` location first. Vendor memory MAY be read as a supplement. If the two conflict, `.agentic/` is ground truth.
+
+**Writes:** Write to the appropriate `.agentic/` location. If the platform supports it and there is no cost to writing both, write to both; the vendor store can improve in-session recall on that platform. It MUST NOT substitute for either canonical store. If only one write is possible, write to the `.agentic/` location.
+
+**What belongs in vendor memory (when used):** Short-form session aids, user preference hints, frequently reloaded facts. No decision records, no history, no state that affects other agents.
+
+**What never belongs in vendor memory alone:** Decisions, history entries, org or people facts, initiative state, anything another agent or a future session would need.
+
 ## The Two Buckets
 
 | Bucket | Path | Rule |
@@ -62,16 +77,11 @@ State files reflect **current reality only**. When reality changes:
 
 - Replace the outdated content in place
 - Update the `Last updated:` field at the top
-- Do not append a changelog of old values -- history files serve that purpose
+- Do not append a changelog of old values. History files serve that purpose.
 
 ## General vs. Agent-Specific Memory
 
-Before writing, ask: "Would any agent, with no prior context, need this?"
-
-- **Yes** -- write to `.agentic/memories/state/` or `.agentic/memories/history/`
-- **No** -- write to the relevant agent's own `memories/` directory
-
-Agent-specific memory is for how an agent has been shaped over time: corrections, confirmed preferences, agent-scoped patterns. It is not for domain facts.
+Agent-specific memory (`.agentic/agents/{name}/memories/`) is for how that agent has been shaped over time: corrections, confirmed preferences, agent-scoped patterns. It is not for domain facts that any agent would need. See BEHAVIOR.md for the decision rule.
 
 ## Anti-Patterns
 

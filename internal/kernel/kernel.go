@@ -13,6 +13,12 @@ import (
 	"github.com/google/go-github/v84/github"
 )
 
+// Agent is a minimal typed view of an agent entry in .agentic/manifest.yml.
+type Agent struct {
+	Name string `yaml:"name"`
+	Path string `yaml:"path"`
+}
+
 // Manifest is a minimal typed view of .agentic/manifest.yml sufficient for
 // sync operations. Unknown/user fields are preserved in the raw decoded map.
 type Manifest struct {
@@ -20,6 +26,7 @@ type Manifest struct {
 		Repository string `yaml:"repository"`
 		Version    string `yaml:"version"`
 	} `yaml:"kernel"`
+	Agents []Agent `yaml:"agents"`
 }
 
 // manifestRepo reads .agentic/manifest.yml from targetDir and returns the
@@ -68,6 +75,31 @@ type KernelInfo struct {
 	Organization string
 	License      string
 	CacheDir     string
+	// AgentPaths contains the path values of all agents declared in the upstream
+	// manifest (e.g. ".agentic/agents/kernel"). Used by sync to derive which
+	// per-agent subdirs are user-owned and must not be overwritten.
+	AgentPaths []string
+}
+
+// AgentPathsFromManifest reads a manifest.yml file and returns the path value
+// for each declared agent. Empty or whitespace-only paths are skipped. An
+// error is returned only when the file cannot be read or parsed.
+func AgentPathsFromManifest(manifestPath string) ([]string, error) {
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("read manifest: %w", err)
+	}
+	var m Manifest
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("parse manifest: %w", err)
+	}
+	paths := make([]string, 0, len(m.Agents))
+	for _, a := range m.Agents {
+		if p := strings.TrimSpace(a.Path); p != "" {
+			paths = append(paths, filepath.ToSlash(p))
+		}
+	}
+	return paths, nil
 }
 
 // downloader abstracts GitHub file retrieval so it can be swapped in tests.
@@ -137,17 +169,25 @@ func fetch(ctx context.Context, d downloader) (*KernelInfo, error) {
 			continue
 		}
 
+		dest := filepath.Join(cacheDir, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+			os.RemoveAll(cacheDir)
+			return nil, fmt.Errorf("create cache subdir for %s: %w", p, err)
+		}
+
+		// .gitkeep files are empty directory placeholders; ensure the directory
+		// exists but skip downloading to avoid spurious 503 responses from the
+		// GitHub API for empty blobs.
+		if filepath.Base(p) == ".gitkeep" {
+			continue
+		}
+
 		content, err := d.download(ctx, p)
 		if err != nil {
 			os.RemoveAll(cacheDir)
 			return nil, fmt.Errorf("fetch %s: %w", p, err)
 		}
 
-		dest := filepath.Join(cacheDir, filepath.FromSlash(p))
-		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
-			os.RemoveAll(cacheDir)
-			return nil, fmt.Errorf("create cache subdir for %s: %w", p, err)
-		}
 		if err := os.WriteFile(dest, content, 0644); err != nil {
 			os.RemoveAll(cacheDir)
 			return nil, fmt.Errorf("cache %s: %w", p, err)
@@ -169,6 +209,10 @@ func fetch(ctx context.Context, d downloader) (*KernelInfo, error) {
 		return nil, fmt.Errorf("parse AGENTS.md frontmatter: %w", err)
 	}
 
+	// Extract agent paths from the cached manifest so sync can derive
+	// user-owned directories dynamically for any kernel structure.
+	agentPaths, _ := AgentPathsFromManifest(filepath.Join(cacheDir, ".agentic", "manifest.yml"))
+
 	return &KernelInfo{
 		Version:      fm["version"],
 		Title:        fm["title"],
@@ -176,6 +220,7 @@ func fetch(ctx context.Context, d downloader) (*KernelInfo, error) {
 		Organization: fm["organization"],
 		License:      fm["license"],
 		CacheDir:     cacheDir,
+		AgentPaths:   agentPaths,
 	}, nil
 }
 

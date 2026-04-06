@@ -11,6 +11,17 @@ A protocol for capturing deferred work during any session and working through it
 
 Location: `.agentic/memories/state/tasks.md`
 
+Template: `.agentic/skills/task-backlog/assets/tasks.template.md`
+
+### Initialization
+
+Before any read or write operation, check whether `.agentic/memories/state/tasks.md` exists.
+
+If it does not exist:
+1. Copy `.agentic/skills/task-backlog/assets/tasks.template.md` to `.agentic/memories/state/tasks.md`.
+2. Note briefly: "Created tasks.md from template."
+3. Continue with the current operation.
+
 ## Task Format
 
 ```
