@@ -15,6 +15,7 @@ import (
 	"github.com/elliottpolk/akctl/internal/kernel"
 	"github.com/elliottpolk/akctl/internal/setup"
 	syncp "github.com/elliottpolk/akctl/internal/sync"
+	"github.com/elliottpolk/akctl/internal/ui"
 )
 
 var (
@@ -138,7 +139,7 @@ func main() {
 					githubTokenFlag,
 				},
 				Action: func(c *cli.Context) error {
-					logger, done := setupLogger(c)
+					_, done := setupLogger(c)
 					defer done(time.Now())
 
 					ctx := context.Background()
@@ -156,9 +157,12 @@ func main() {
 						return cli.Exit(err.Error(), 1)
 					}
 
-					logger.Info("fetching upstream kernel", "source", owner+"/"+repo)
+					var reporter kernel.ProgressReporter
+					if !c.Bool(forceFlag.Name) {
+						reporter = ui.NewTeaProgressReporter()
+					}
 
-					k, err := kernel.Fetch(ctx, client, owner, repo)
+					k, err := kernel.Fetch(ctx, client, owner, repo, reporter)
 					if err != nil {
 						if ghpkg.IsNotFound(err) && token == "" {
 							return cli.Exit("repo not found or may be private; use --github.token if the repo is private", 1)
@@ -170,8 +174,6 @@ func main() {
 					}
 					defer os.RemoveAll(k.CacheDir)
 
-					logger.Debug("kernel fetched", "version", k.Version, "cache", k.CacheDir)
-
 					if err := setup.Run(k, setup.Options{
 						Force:     c.Bool(forceFlag.Name),
 						TargetDir: ".",
@@ -179,6 +181,7 @@ func main() {
 						return cli.Exit(err.Error(), 1)
 					}
 
+					fmt.Println(ui.SuccessStyle.Render("Agentic kernel initialized successfully."))
 					return nil
 				},
 			},

@@ -439,7 +439,7 @@ func TestFetch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			k, err := fetch(context.Background(), tt.downloader)
+			k, err := fetch(context.Background(), tt.downloader, nil)
 
 			if tt.wantErr {
 				assert.Error(t, err)

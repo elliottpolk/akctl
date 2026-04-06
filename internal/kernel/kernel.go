@@ -154,16 +154,23 @@ func (d *ghDownloader) download(ctx context.Context, path string) ([]byte, error
 	return io.ReadAll(rc)
 }
 
+// ProgressReporter defines an interface for tracking the progress of kernel fetching.
+type ProgressReporter interface {
+	Start(title string, total int)
+	Inc()
+	Finish(message string)
+}
+
 // Fetch retrieves the upstream kernel from GitHub, writes all relevant files
 // to a temporary directory, and returns a KernelInfo with metadata and the
 // cache path. On any failure the temp dir is removed and the error is returned
 // verbatim. The caller is responsible for os.RemoveAll(k.CacheDir) when done.
-func Fetch(ctx context.Context, client *github.Client, owner, repo string) (*KernelInfo, error) {
-	return fetch(ctx, &ghDownloader{client: client, owner: owner, repo: repo})
+func Fetch(ctx context.Context, client *github.Client, owner, repo string, reporter ProgressReporter) (*KernelInfo, error) {
+	return fetch(ctx, &ghDownloader{client: client, owner: owner, repo: repo}, reporter)
 }
 
 // fetch is the testable core of Fetch -- accepts any downloader implementation.
-func fetch(ctx context.Context, d downloader) (*KernelInfo, error) {
+func fetch(ctx context.Context, d downloader, reporter ProgressReporter) (*KernelInfo, error) {
 	paths, err := d.getTree(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch kernel tree: %w", err)
@@ -172,6 +179,18 @@ func fetch(ctx context.Context, d downloader) (*KernelInfo, error) {
 	cacheDir, err := os.MkdirTemp("", "akctl-kernel-*")
 	if err != nil {
 		return nil, fmt.Errorf("create cache dir: %w", err)
+	}
+
+	if reporter != nil {
+		count := 0
+		for _, p := range paths {
+			if p == "AGENTS.md" || strings.HasPrefix(p, ".agentic/") {
+				if filepath.Base(p) != ".gitkeep" {
+					count++
+				}
+			}
+		}
+		reporter.Start("Fetching upstream kernel...", count)
 	}
 
 	var agentsMDContent []byte
@@ -208,6 +227,14 @@ func fetch(ctx context.Context, d downloader) (*KernelInfo, error) {
 		if p == "AGENTS.md" {
 			agentsMDContent = content
 		}
+
+		if reporter != nil {
+			reporter.Inc()
+		}
+	}
+
+	if reporter != nil {
+		reporter.Finish("")
 	}
 
 	if agentsMDContent == nil {

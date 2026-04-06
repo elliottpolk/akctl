@@ -11,9 +11,9 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/elliottpolk/akctl/internal/kernel"
+	"github.com/elliottpolk/akctl/internal/ui"
 )
 
 // Options controls init behavior.
@@ -33,9 +33,6 @@ type projectMeta struct {
 }
 
 var (
-	warnHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))
-	warnPath   = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-
 	// collectMetaFn and confirmFn are package-level vars so tests can inject
 	// non-interactive implementations without a TTY.
 	collectMetaFn = collectMeta
@@ -117,11 +114,11 @@ func genDestructList(target string, agentsmd, dotagentic bool) []string {
 // showDestructList prints the files that will be destroyed.
 // pretty=true renders a tree-like hierarchy; pretty=false prints plain lines.
 func showDestructList(paths []string, pretty bool) {
-	fmt.Println(warnHeader.Render("The following will be permanently destroyed:"))
+	fmt.Println(ui.WarnStyle.Render("The following will be permanently destroyed:"))
 
 	if !pretty {
 		for _, p := range paths {
-			fmt.Println(warnPath.Render("  " + p))
+			fmt.Println(ui.PathStyle.Render("  " + p))
 		}
 		return
 	}
@@ -140,14 +137,14 @@ func showDestructList(paths []string, pretty bool) {
 	for i, e := range entries {
 		if !printed[e.dir] {
 			printed[e.dir] = true
-			fmt.Println(warnPath.Render("  " + e.dir + "/"))
+			fmt.Println(ui.PathStyle.Render("  " + e.dir + "/"))
 		}
 		isLast := i == len(entries)-1 || entries[i+1].dir != e.dir
 		branch := "├── "
 		if isLast {
 			branch = "└── "
 		}
-		fmt.Println(warnPath.Render("    " + branch + e.file))
+		fmt.Println(ui.PathStyle.Render("    " + branch + e.file))
 	}
 	fmt.Println()
 }
