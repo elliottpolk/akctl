@@ -165,7 +165,7 @@ func confirmOverwrite(force bool) (bool, error) {
 				Negative("No").
 				Value(&ok),
 		),
-	)
+	).WithTheme(huh.ThemeCharm())
 	if err := form.Run(); err != nil {
 		return false, err
 	}
@@ -222,7 +222,7 @@ func collectMeta(defaultName string) (*projectMeta, error) {
 				Placeholder("https://github.com/owner/repo").
 				Value(&m.Repo),
 		),
-	)
+	).WithTheme(huh.ThemeCharm())
 
 	if err := form.Run(); err != nil {
 		return nil, err

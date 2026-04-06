@@ -82,6 +82,11 @@ func Run(ctx context.Context, client *gogithub.Client, opts Options) error {
 		return fmt.Errorf("resolve core paths: %w", err)
 	}
 
+	if len(coreFiles) == 0 {
+		fmt.Println(ui.SuccessStyle.Render("Everything is already up to date."))
+		return nil
+	}
+
 	warnFn(repoURL, coreFiles)
 
 	// Recovery mode: inform user before proceeding.
@@ -180,8 +185,9 @@ func userOwned(rel string, agentPaths []string) bool {
 }
 
 // corePaths returns the list of relative paths (from dir) that sync will
-// overwrite -- the intersection of upstream cache files and non-user-owned paths.
-// agentPaths is forwarded to userOwned to derive protected paths dynamically.
+// overwrite -- the intersection of upstream cache files and non-user-owned paths
+// that have actually changed. agentPaths is forwarded to userOwned to derive
+// protected paths dynamically.
 func corePaths(dir, cacheDir string, agentPaths []string) ([]string, error) {
 	var paths []string
 	err := filepath.WalkDir(cacheDir, func(src string, d fs.DirEntry, err error) error {
@@ -190,9 +196,41 @@ func corePaths(dir, cacheDir string, agentPaths []string) ([]string, error) {
 		}
 		rel, _ := filepath.Rel(cacheDir, src)
 		rel = filepath.ToSlash(rel)
-		if !userOwned(rel, agentPaths) {
+		if userOwned(rel, agentPaths) {
+			return nil
+		}
+
+		// Check if file actually changed
+		dst := filepath.Join(dir, filepath.FromSlash(rel))
+		localData, err := os.ReadFile(dst)
+		if os.IsNotExist(err) {
+			paths = append(paths, rel)
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		upstreamData, err := os.ReadFile(src)
+		if err != nil {
+			return err
+		}
+
+		if rel == filepath.ToSlash(filepath.Join(".agentic", "manifest.yml")) {
+			mergedData, err := mergeManifest(localData, upstreamData)
+			if err != nil {
+				return err
+			}
+			if !bytes.Equal(localData, mergedData) {
+				paths = append(paths, rel)
+			}
+			return nil
+		}
+
+		if !bytes.Equal(localData, upstreamData) {
 			paths = append(paths, rel)
 		}
+
 		return nil
 	})
 	return paths, err
@@ -444,7 +482,7 @@ func confirm(force bool) (bool, error) {
 				Negative("No").
 				Value(&ok),
 		),
-	)
+	).WithTheme(huh.ThemeCharm())
 	if err := form.Run(); err != nil {
 		return false, err
 	}
