@@ -418,6 +418,9 @@ project:
 				content, err := os.ReadFile(filepath.Join(target, ".agentic", "manifest.yml"))
 				require.NoError(t, err)
 				assert.Contains(t, string(content), `name: "my-project"`)
+				gi, err := os.ReadFile(filepath.Join(target, ".gitignore"))
+				require.NoError(t, err)
+				assert.Contains(t, string(gi), ".agentic/**/*.local.md")
 			},
 		},
 		{
@@ -561,6 +564,9 @@ project:
 				content, err := os.ReadFile(filepath.Join(dir, ".agentic", "manifest.yml"))
 				require.NoError(t, err)
 				assert.Contains(t, string(content), `author: "Test Author"`)
+				gi, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+				require.NoError(t, err)
+				assert.Contains(t, string(gi), ".agentic/**/*.local.md")
 			},
 		},
 		{

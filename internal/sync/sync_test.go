@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elliottpolk/akctl/internal/gitignore"
 	"github.com/elliottpolk/akctl/internal/kernel"
 )
 
@@ -426,6 +428,11 @@ func TestRun_normalSync(t *testing.T) {
 	// memories/.gitkeep NOT written (user-owned).
 	_, err = os.Stat(filepath.Join(dir, ".agentic", "memories", "state", ".gitkeep"))
 	assert.True(t, os.IsNotExist(err))
+
+	// .gitignore updated with local override pattern.
+	gi, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	require.NoError(t, err)
+	assert.Contains(t, string(gi), ".agentic/**/*.local.md")
 }
 
 func TestRun_abortWhenAbsent(t *testing.T) {
@@ -494,6 +501,11 @@ func runWithCache(targetDir, cacheDir string) error {
 	}
 
 	os.RemoveAll(cache)
+
+	if err := gitignore.Ensure(targetDir, gitignore.Pattern); err != nil {
+		return fmt.Errorf("update .gitignore: %w", err)
+	}
+
 	return nil
 }
 

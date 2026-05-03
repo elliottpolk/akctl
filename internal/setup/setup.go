@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/huh"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/elliottpolk/akctl/internal/gitignore"
 	"github.com/elliottpolk/akctl/internal/kernel"
 )
 
@@ -263,6 +264,11 @@ func writeKernel(target string, k *kernel.KernelInfo, meta *projectMeta) error {
 	if err != nil {
 		cleanup(created)
 		return fmt.Errorf("write kernel files: %w", err)
+	}
+
+	if err := gitignore.Ensure(target, gitignore.Pattern); err != nil {
+		cleanup(created)
+		return fmt.Errorf("update .gitignore: %w", err)
 	}
 
 	return nil

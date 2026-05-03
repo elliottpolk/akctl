@@ -14,6 +14,7 @@ import (
 	gogithub "github.com/google/go-github/v84/github"
 	"gopkg.in/yaml.v3"
 
+	"github.com/elliottpolk/akctl/internal/gitignore"
 	"github.com/elliottpolk/akctl/internal/kernel"
 	"github.com/elliottpolk/akctl/internal/ui"
 )
@@ -114,6 +115,11 @@ func Run(ctx context.Context, client *gogithub.Client, opts Options) error {
 	}
 
 	os.RemoveAll(cache)
+
+	if err := gitignore.Ensure(dir, gitignore.Pattern); err != nil {
+		return fmt.Errorf("update .gitignore: %w", err)
+	}
+
 	return nil
 }
 
