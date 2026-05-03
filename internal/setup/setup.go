@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/elliottpolk/akctl/internal/gitignore"
 	"github.com/elliottpolk/akctl/internal/kernel"
@@ -20,6 +21,7 @@ import (
 // Options controls init behavior.
 type Options struct {
 	Force     bool
+	Debug     bool
 	TargetDir string
 }
 
@@ -34,8 +36,8 @@ type projectMeta struct {
 }
 
 var (
-	// collectMetaFn and confirmFn are package-level vars so tests can inject
-	// non-interactive implementations without a TTY.
+	// collectMetaFn, confirmFn, and probeMetaFn are package-level vars so tests
+	// can inject non-interactive or no-shell implementations without a TTY.
 	collectMetaFn = collectMeta
 	confirmFn     = confirmOverwrite
 )
@@ -69,7 +71,15 @@ func Run(k *kernel.KernelInfo, opts Options) error {
 		return fmt.Errorf("determine project name: %w", err)
 	}
 
-	meta, err := collectMetaFn(defaultName)
+	defaults, info := probeMetaFn(target)
+	defaults.Name = defaultName
+
+	var debugLines []string
+	if opts.Debug {
+		debugLines = info.DebugLines()
+	}
+
+	meta, err := collectMetaFn(defaults, debugLines)
 	if err != nil {
 		return fmt.Errorf("collect metadata: %w", err)
 	}
@@ -156,15 +166,17 @@ func destroyConflicts(target string, agentsmd, dotagentic bool) error {
 	return nil
 }
 
-// collectMeta runs the interactive project metadata form.
-func collectMeta(defaultName string) (*projectMeta, error) {
-	m := &projectMeta{Name: defaultName}
+// collectMeta runs the interactive project metadata form, pre-filling fields
+// from defaults where available. When debugLines is non-empty, a 3-line
+// bordered debug panel is rendered below the form.
+func collectMeta(defaults *projectMeta, debugLines []string) (*projectMeta, error) {
+	m := *defaults
 
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().
 				Title("Project name").
-				Placeholder(defaultName).
+				Placeholder(defaults.Name).
 				Value(&m.Name),
 			huh.NewInput().
 				Title("Description").
@@ -191,17 +203,90 @@ func collectMeta(defaultName string) (*projectMeta, error) {
 				Placeholder("https://github.com/owner/repo").
 				Value(&m.Repo),
 		),
-	).WithTheme(huh.ThemeCharm()).WithProgramOptions(tea.WithAltScreen())
+	).WithTheme(huh.ThemeCharm())
 
-	if err := form.Run(); err != nil {
+	p := tea.NewProgram(
+		metaFormModel{form: form, debugLines: debugLines},
+		tea.WithAltScreen(),
+	)
+	if _, err := p.Run(); err != nil {
 		return nil, err
+	}
+	if form.State == huh.StateAborted {
+		return nil, huh.ErrUserAborted
 	}
 
 	if strings.TrimSpace(m.Name) == "" {
-		m.Name = defaultName
+		m.Name = defaults.Name
 	}
 
-	return m, nil
+	return &m, nil
+}
+
+// metaFormModel is a BubbleTea model that renders a huh form with an optional
+// 3-line debug panel pinned to the bottom of the screen.
+type metaFormModel struct {
+	form       *huh.Form
+	debugLines []string
+	width      int
+	height     int
+}
+
+func (m metaFormModel) Init() tea.Cmd {
+	return m.form.Init()
+}
+
+func (m metaFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if ws, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width = ws.Width
+		m.height = ws.Height
+	}
+
+	f, cmd := m.form.Update(msg)
+	if form, ok := f.(*huh.Form); ok {
+		m.form = form
+	}
+
+	if m.form.State != huh.StateNormal {
+		return m, tea.Quit
+	}
+	return m, cmd
+}
+
+func (m metaFormModel) View() string {
+	if len(m.debugLines) == 0 || m.width == 0 {
+		return m.form.View()
+	}
+	return lipgloss.JoinVertical(lipgloss.Left,
+		m.form.View(),
+		renderDebugPanel(m.debugLines, m.width),
+	)
+}
+
+// renderDebugPanel builds a lipgloss-bordered panel containing exactly 3 lines
+// of dimmed diagnostic text, spanning the full terminal width.
+func renderDebugPanel(lines []string, width int) string {
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+
+	rows := make([]string, 3)
+	for i := range rows {
+		if i < len(lines) {
+			rows[i] = dimStyle.Render(lines[i])
+		}
+	}
+
+	// 2 border columns + 2 padding columns = 4 overhead; clamp to safe minimum.
+	innerW := width - 4
+	if innerW < 1 {
+		innerW = 1
+	}
+
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		Padding(0, 1).
+		Width(innerW).
+		Render(strings.Join(rows, "\n"))
 }
 
 // writeKernel copies files from k.CacheDir to target, injecting project

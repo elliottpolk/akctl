@@ -534,9 +534,9 @@ project:
   repository: ""
 `
 
-	testMeta := func(defaultName string) (*projectMeta, error) {
+	testMeta := func(defaults *projectMeta, debugLines []string) (*projectMeta, error) {
 		return &projectMeta{
-			Name:    defaultName,
+			Name:    defaults.Name,
 			Desc:    "A test project",
 			Author:  "Test Author",
 			License: "MIT",
@@ -623,8 +623,10 @@ project:
 			// inject non-interactive stubs
 			orig := collectMetaFn
 			origConfirm := confirmFn
-			t.Cleanup(func() { collectMetaFn = orig; confirmFn = origConfirm })
+			origProbe := probeMetaFn
+			t.Cleanup(func() { collectMetaFn = orig; confirmFn = origConfirm; probeMetaFn = origProbe })
 			collectMetaFn = testMeta
+			probeMetaFn = func(dir string) (*projectMeta, probeInfo) { return &projectMeta{}, probeInfo{} }
 			if tt.overrideConfirm != nil {
 				confirmFn = tt.overrideConfirm
 			}
@@ -647,5 +649,117 @@ project:
 	}
 }
 
+// TestRunProbeDefaults verifies that values returned by probeMetaFn are
+// forwarded to collectMetaFn as the defaults struct.
+func TestRunProbeDefaults(t *testing.T) {
+	upstreamManifest := `version: "1.0"
+project:
+  name: ""
+  description: ""
+  author: ""
+  organization: ""
+  copyright: ""
+  license: ""
+  repository: ""
+`
 
-// --- toKebab ---
+	cacheDir := t.TempDir()
+	agentsMD := "---\ntitle: Agentic Kernel\nversion: \"1.0\"\n---\n# Agentic Kernel\n"
+	require.NoError(t, os.WriteFile(filepath.Join(cacheDir, "AGENTS.md"), []byte(agentsMD), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(cacheDir, ".agentic"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(cacheDir, ".agentic", "manifest.yml"), []byte(upstreamManifest), 0644))
+	k := &kernel.KernelInfo{Version: "1.0", CacheDir: cacheDir}
+
+	probed := &projectMeta{
+		Desc:    "Probed description",
+		Org:     "probed-org",
+		License: "Apache-2.0",
+		Repo:    "https://github.com/probed/repo",
+	}
+
+	var gotDefaults *projectMeta
+
+	orig := collectMetaFn
+	origProbe := probeMetaFn
+	t.Cleanup(func() { collectMetaFn = orig; probeMetaFn = origProbe })
+
+	probeMetaFn = func(dir string) (*projectMeta, probeInfo) { return probed, probeInfo{} }
+	collectMetaFn = func(defaults *projectMeta, debugLines []string) (*projectMeta, error) {
+		gotDefaults = defaults
+		return defaults, nil
+	}
+
+	dir := t.TempDir()
+	err := Run(k, Options{TargetDir: dir})
+	require.NoError(t, err)
+
+	require.NotNil(t, gotDefaults)
+	assert.Equal(t, probed.Desc, gotDefaults.Desc, "description should come from probe")
+	assert.Equal(t, probed.Org, gotDefaults.Org, "org should come from probe")
+	assert.Equal(t, probed.License, gotDefaults.License, "license should come from probe")
+	assert.Equal(t, probed.Repo, gotDefaults.Repo, "repo should come from probe")
+	assert.NotEmpty(t, gotDefaults.Name, "name should still be set from dirName")
+}
+
+// TestRunDebugLines verifies that when Debug is true, debug lines from the
+// probe are forwarded to collectMetaFn, and when Debug is false they are not.
+func TestRunDebugLines(t *testing.T) {
+	upstreamManifest := `version: "1.0"
+project:
+  name: ""
+  description: ""
+  author: ""
+  organization: ""
+  copyright: ""
+  license: ""
+  repository: ""
+`
+	buildTestCache := func(t *testing.T) *kernel.KernelInfo {
+		t.Helper()
+		cacheDir := t.TempDir()
+		agentsMD := "---\ntitle: Agentic Kernel\nversion: \"1.0\"\n---\n# Agentic Kernel\n"
+		require.NoError(t, os.WriteFile(filepath.Join(cacheDir, "AGENTS.md"), []byte(agentsMD), 0644))
+		require.NoError(t, os.MkdirAll(filepath.Join(cacheDir, ".agentic"), 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(cacheDir, ".agentic", "manifest.yml"), []byte(upstreamManifest), 0644))
+		return &kernel.KernelInfo{Version: "1.0", CacheDir: cacheDir}
+	}
+
+	fakeInfo := probeInfo{ghPath: "/usr/bin/gh", cmdRun: "gh repo view --json ...", meta: &projectMeta{Desc: "x"}}
+
+	tests := []struct {
+		name          string
+		debug         bool
+		wantDebugLines bool
+	}{
+		{"debug=false passes nil debugLines", false, false},
+		{"debug=true passes debug lines", true, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotLines []string
+
+			orig := collectMetaFn
+			origProbe := probeMetaFn
+			t.Cleanup(func() { collectMetaFn = orig; probeMetaFn = origProbe })
+
+			probeMetaFn = func(dir string) (*projectMeta, probeInfo) {
+				return &projectMeta{}, fakeInfo
+			}
+			collectMetaFn = func(defaults *projectMeta, debugLines []string) (*projectMeta, error) {
+				gotLines = debugLines
+				return defaults, nil
+			}
+
+			dir := t.TempDir()
+			err := Run(buildTestCache(t), Options{TargetDir: dir, Debug: tt.debug})
+			require.NoError(t, err)
+
+			if tt.wantDebugLines {
+				assert.Len(t, gotLines, 3, "should receive 3 debug lines")
+			} else {
+				assert.Empty(t, gotLines, "should receive no debug lines when debug=false")
+			}
+		})
+	}
+}

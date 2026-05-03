@@ -43,16 +43,16 @@ var (
 		Usage:   "Skip destructive overwrite confirmation prompts",
 	}
 
+	debugFlag = &cli.BoolFlag{
+		Name:    "debug",
+		Aliases: []string{"d"},
+		Usage:   "Show probe diagnostics in the metadata form",
+	}
+
 	kernelSourceFlag = &cli.StringFlag{
 		Name:    "kernel.source",
 		Aliases: []string{"kernel.src"},
 		Usage:   "Kernel source as github.com/<owner>/<repo> (default: github.com/elliottpolk/agentic-kernel)",
-	}
-
-	githubTokenFlag = &cli.StringFlag{
-		Name:    "github.token",
-		Usage:   "GitHub personal access token for private repos and higher rate limits",
-		EnvVars: []string{"GITHUB_TOKEN"},
 	}
 )
 
@@ -135,8 +135,8 @@ func main() {
 					logLevelFlag,
 					logFormatFlag,
 					forceFlag,
+					debugFlag,
 					kernelSourceFlag,
-					githubTokenFlag,
 				},
 				Action: func(c *cli.Context) error {
 					_, done := setupLogger(c)
@@ -149,7 +149,14 @@ func main() {
 						return cli.Exit(err.Error(), 1)
 					}
 
-					token := strings.TrimSpace(c.String(githubTokenFlag.Name))
+					if err := ghpkg.EnsureGH(); err != nil {
+						return cli.Exit(err.Error(), 1)
+					}
+
+					token, err := ghpkg.ResolveToken()
+					if err != nil {
+						return cli.Exit(err.Error(), 1)
+					}
 
 					client := ghpkg.NewClient(ctx, token)
 
@@ -164,9 +171,6 @@ func main() {
 
 					k, err := kernel.Fetch(ctx, client, owner, repo, reporter)
 					if err != nil {
-						if ghpkg.IsNotFound(err) && token == "" {
-							return cli.Exit("repo not found or may be private; use --github.token if the repo is private", 1)
-						}
 						if ghpkg.IsNotFound(err) {
 							return cli.Exit(fmt.Sprintf("repo %s/%s not found", owner, repo), 1)
 						}
@@ -176,6 +180,7 @@ func main() {
 
 					if err := setup.Run(k, setup.Options{
 						Force:     c.Bool(forceFlag.Name),
+						Debug:     c.Bool(debugFlag.Name),
 						TargetDir: ".",
 					}); err != nil {
 						return cli.Exit(err.Error(), 1)
@@ -193,7 +198,6 @@ func main() {
 					logLevelFlag,
 					logFormatFlag,
 					forceFlag,
-					githubTokenFlag,
 				},
 				Action: func(c *cli.Context) error {
 					_, done := setupLogger(c)
@@ -201,7 +205,15 @@ func main() {
 
 					ctx := context.Background()
 
-					token := strings.TrimSpace(c.String(githubTokenFlag.Name))
+					if err := ghpkg.EnsureGH(); err != nil {
+						return cli.Exit(err.Error(), 1)
+					}
+
+					token, err := ghpkg.ResolveToken()
+					if err != nil {
+						return cli.Exit(err.Error(), 1)
+					}
+
 					client := ghpkg.NewClient(ctx, token)
 
 					if err := ghpkg.CheckRateLimit(ctx, client); err != nil {

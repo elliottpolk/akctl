@@ -192,3 +192,31 @@ func TestIsNotFound(t *testing.T) {
 		})
 	}
 }
+
+// --- ResolveToken ---
+
+func TestResolveToken(t *testing.T) {
+	t.Run("GITHUB_TOKEN env var is used", func(t *testing.T) {
+		t.Setenv("GITHUB_TOKEN", "env-token-value")
+
+		token, err := ghpkg.ResolveToken()
+		require.NoError(t, err)
+		assert.Equal(t, "env-token-value", token)
+	})
+
+	t.Run("returns error when no token source available", func(t *testing.T) {
+		t.Setenv("GITHUB_TOKEN", "")
+
+		// This test will succeed when gh is not authenticated (gh auth token returns empty/error)
+		// or gh is not installed. We can only reliably assert the shape of the error.
+		_, err := ghpkg.ResolveToken()
+
+		// In CI or environments without gh auth, this should return an error.
+		// In environments where gh is authenticated, the test is skipped to avoid
+		// false failures due to a valid gh session.
+		if err == nil {
+			t.Skip("gh CLI is authenticated in this environment; skipping no-token error test")
+		}
+		assert.ErrorContains(t, err, "no token found")
+	})
+}
