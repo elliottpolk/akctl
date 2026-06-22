@@ -75,3 +75,8 @@ Please keep pull requests focused. One thing per PR.
 ## License
 
 See [LICENSE](LICENSE).
+
+## TODO:
+
+- [ ] Add the marketplace capability [link](https://github.com/elliottpolk/agentic-marketplace)
+- [ ] Add a TUI for the marketplace
